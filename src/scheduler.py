@@ -23,7 +23,7 @@ class WorkforceAnalyzer:
 
         roster = []  # Сюда будем писать результат
 
-        # 3. Пробегаем по трамваям (выходам)
+        # 3. Пробегаем по трамваям
         for tram in schedule.trams:
             tram_result = {
                 "tram_number": tram.number,
@@ -69,17 +69,25 @@ class WorkforceAnalyzer:
         }
 
     def _find_driver(self, drivers: List, day: int, shift_type: str):
-        """Вспомогательная функция поиска свободного водителя"""
+        """
+        Ищет водителя СТРОГО по коду в табеле на этот день.
+        Никакой самодеятельности.
+        """
         for driver in drivers:
-            status = driver.get_status_for_day(day)
+            status = driver.get_status_for_day(day)  # Тут будет "1", "2", "В" или "Б"
 
-            # Логика: что считается "Работой"?
-            # Тут нужно уточнить твои коды из табеля.
-            is_working = status not in ["B", "О", "Б"]  # Выходной, Отпуск, Больничный
+            # --- ИЩЕМ НА УТРО ---
+            if shift_type == "morning":
+                # Берем только тех, у кого в табеле стоит "1"
+                if status == "1":
+                    return driver
 
-            # Тут можно добавить проверку: подходит ли он под утро/вечер
-            # driver.shift_preference...
+            # --- ИЩЕМ НА ВЕЧЕР ---
+            elif shift_type == "evening":
+                # Берем только тех, у кого в табеле стоит "2"
+                if status == "2":
+                    return driver
 
-            if is_working:
-                return driver
+            # Любой другой статус ("В", "Б", "О", или не та смена) -> Игнорируем
+
         return None
