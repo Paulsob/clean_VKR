@@ -11,9 +11,8 @@ class Driver(BaseModel):
     id: int = Field(alias="tab_number")  # В JSON: tab_number
     schedule_pattern: str = Field(alias="schedule")  # В JSON: schedule
     shift_preference: str = Field(alias="mode")  # В JSON: mode
-
+    month: Optional[str] = None
     days_list: List[DayStatus] = Field(alias="days")
-
     assigned_route_number: Optional[int] = None
 
     def get_status_for_day(self, day_num: int) -> str:

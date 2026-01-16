@@ -8,11 +8,11 @@ SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
 
 TABELS_DIR = PROJECT_ROOT / "data" / "tabeles_2026"
-OUTPUT_PATH = PROJECT_ROOT / "data" / "drivers.json"
+OUTPUT_DIR = PROJECT_ROOT / "data" / "drivers_json"
 YEAR = 2026
 
-# Сопоставление английских названий месяцев → русские (для JSON)
-MONTH_EN_TO_RU = {
+# Английские → русские названия месяцев (для содержимого JSON)
+EN_TO_RU_MONTH = {
     "january": "Январь",
     "february": "Февраль",
     "march": "Март",
@@ -27,25 +27,28 @@ MONTH_EN_TO_RU = {
     "december": "Декабрь",
 }
 
-# Порядок месяцев для сортировки
-MONTH_ORDER = list(MONTH_EN_TO_RU.keys())
+# Для определения количества дней в месяце
+EN_MONTH_TO_NUM = {en: i + 1 for i, en in enumerate([
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december"
+])}
 
+MONTH_ORDER = list(EN_TO_RU_MONTH.keys())
 SHEET_NAME = "Sheet1"
 
 
-def extract_month_from_filename(filename: str) -> str | None:
-    """Извлекает название месяца из имени файла (например, 'january_2026.xlsx' → 'Январь')."""
+def extract_english_month(filename: str) -> str | None:
+    """Извлекает английское название месяца из имени файла (например, 'january_2026.xlsx' → 'january')."""
     stem = filename.lower().replace(".xlsx", "")
     for en_month in MONTH_ORDER:
         if en_month in stem:
-            return MONTH_EN_TO_RU[en_month]
+            return en_month
     return None
 
 
-def parse_whole_sheet(sheet_rows, month_name: str, year: int):
+def parse_whole_sheet(sheet_rows, en_month: str, year: int):
     """Парсит одну таблицу в структуру водителей."""
-    # Получаем номер месяца
-    month_num = list(MONTH_EN_TO_RU.values()).index(month_name) + 1
+    month_num = EN_MONTH_TO_NUM[en_month]
     days_in_month = calendar.monthrange(year, month_num)[1]
 
     if not sheet_rows:
@@ -81,7 +84,6 @@ def parse_whole_sheet(sheet_rows, month_name: str, year: int):
             "tab_number": tab_number,
             "schedule": schedule,
             "mode": mode,
-            "month": month_name,  # Добавляем месяц для контекста
             "days": days
         })
 
@@ -89,10 +91,10 @@ def parse_whole_sheet(sheet_rows, month_name: str, year: int):
 
 
 def main():
-    all_drivers = []
-
     if not TABELS_DIR.exists():
         raise FileNotFoundError(f"Папка с табелями не найдена: {TABELS_DIR}")
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # Сортируем файлы по порядку месяцев
     files = sorted(
@@ -102,13 +104,16 @@ def main():
         )
     )
 
+    processed = 0
+
     for file_path in files:
-        month_name = extract_month_from_filename(file_path.name)
-        if not month_name:
+        en_month = extract_english_month(file_path.name)
+        if not en_month:
             print(f"⚠️ Пропущен файл (не распознан месяц): {file_path.name}")
             continue
 
-        print(f"Обрабатываю: {file_path.name} → {month_name} {YEAR}")
+        ru_month = EN_TO_RU_MONTH[en_month]
+        print(f"Обрабатываю: {file_path.name} → {ru_month} {YEAR}")
 
         try:
             workbook = load_workbook(file_path, data_only=True)
@@ -118,24 +123,26 @@ def main():
 
             sheet = workbook[SHEET_NAME]
             rows = [list(row) for row in sheet.iter_rows(values_only=True)]
-            drivers = parse_whole_sheet(rows, month_name, YEAR)
-            all_drivers.extend(drivers)
+            drivers = parse_whole_sheet(rows, en_month, YEAR)
+
+            # Имя файла: drivers_january.json
+            output_file = OUTPUT_DIR / f"drivers_{en_month}.json"
+            result_data = {
+                "month": ru_month,  # Внутри — по-русски, как вы просили
+                "year": YEAR,
+                "drivers": drivers
+            }
+
+            with open(output_file, "w", encoding="utf-8") as f:
+                json.dump(result_data, f, ensure_ascii=False, indent=2)
+
+            processed += 1
 
         except Exception as e:
             print(f"  ❌ Ошибка при обработке {file_path.name}: {e}")
 
-    # Сохраняем результат
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    result = {
-        "year": YEAR,
-        "drivers": all_drivers
-    }
-
-    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-
-    print(f"\n✅ Успешно обработано {len(all_drivers)} записей водителей.")
-    print(f"Результат сохранён в: {OUTPUT_PATH}")
+    print(f"\n✅ Успешно обработано {processed} месяцев.")
+    print(f"Файлы сохранены в: {OUTPUT_DIR.absolute()}")
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ class WorkforceAnalyzer:
     def __init__(self, db: DataLoader):
         self.db = db
 
-    def generate_daily_roster(self, route_number: int, day_of_month: int):
+    def generate_daily_roster(self, route_number: int, day_of_month: int, target_month: str):
         """
         Попытка расставить реальных людей на смены конкретного числа.
         """

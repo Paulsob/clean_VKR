@@ -20,30 +20,55 @@ class DataLoader:
         print("--- ЗАГРУЗКА ЗАВЕРШЕНА ---")
 
     def _load_drivers(self):
-        path = os.path.join(self.data_folder, "drivers.json")
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                raw_data = json.load(f)
+        # Путь к папке с JSON-ами месяцев
+        drivers_dir = os.path.join(self.data_folder, "drivers_json")
 
-                # 1. Если это словарь и в нем есть ключ "drivers" -> берем список оттуда
-                if isinstance(raw_data, dict) and "drivers" in raw_data:
-                    drivers_list = raw_data["drivers"]
-                    print(f"Загружаем данные за: {raw_data.get('month')} {raw_data.get('year')}")
+        # Проверяем, существует ли папка
+        if not os.path.exists(drivers_dir):
+            print(f"Ошибка: Папка {drivers_dir} не найдена!")
+            return
 
-                # # 2. Если это просто список (старый формат) -> берем как есть
-                # elif isinstance(raw_data, list):
-                #     drivers_list = raw_data
-                #
-                # # 3. Если это одиночный объект без ключа drivers (на всякий случай)
-                # else:
-                #     drivers_list = [raw_data]
+        print(f"Сканирую папку: {drivers_dir} ...")
 
-                self.drivers = [Driver(**d) for d in drivers_list]
+        # Получаем список всех файлов в папке
+        files = [f for f in os.listdir(drivers_dir) if f.endswith('.json')]
 
-            print(f"Табель: {len(self.drivers)} водителей")
-        except Exception as e:
-            # Добавил вывод типа ошибки, чтобы понятнее было
-            print(f"Ошибка drivers.json: {type(e).__name__}: {e}")
+        if not files:
+            print("В папке нет JSON файлов!")
+            return
+
+        self.drivers = []
+
+        for filename in files:
+            filepath = os.path.join(drivers_dir, filename)
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                    # Ожидаем структуру: { "month": "...", "drivers": [...] }
+                    month_name = data.get("month", "Unknown")
+                    year = data.get("year", "Unknown")
+                    drivers_list = data.get("drivers", [])
+
+                    # Превращаем в объекты и добавляем в общий список
+                    count = 0
+                    for d_dict in drivers_list:
+                        # ВАЖНО: обрабатываем случай, если ID написан как "0009" (строка) или 9 (число)
+                        # Pydantic сам попытается привести к int, если в модели int
+                        driver = Driver(**d_dict)
+                        driver.month = month_name  # Прописываем месяц
+                        self.drivers.append(driver)
+                        count += 1
+
+                    print(f"   📄 {filename}: Загружен {month_name} {year} ({count} вод.)")
+
+            except json.JSONDecodeError as e:
+                print(f"Ошибка JSON в файле {filename}: {e}")
+                print("(Проверь, нет ли у тебя чисел вида 0009 без кавычек?)")
+            except Exception as e:
+                print(f"Ошибка чтения {filename}: {e}")
+
+        print(f"Всего загружено водителей (сумма по всем месяцам): {len(self.drivers)}")
 
     def _load_schedules(self):
         path = os.path.join(self.data_folder, "schedule.json")

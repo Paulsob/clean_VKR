@@ -13,7 +13,12 @@ def main():
 
     print("\n--- ГЕНЕРАЦИЯ НАРЯДА НА 5-е ЧИСЛО ---")
     # Пытаемся закрыть Маршрут №1
-    result = analyzer.generate_daily_roster(route_number=1, day_of_month=5)
+    result = analyzer.generate_daily_roster(
+        route_number=1,
+        day_of_month=5,
+        target_month="Январь"  # <-- Укажи то, что написано внутри JSON поля "month"
+    )
+
 
     for tram in result["roster"]:
         print(f"Трамвай {tram['tram_number']}:")
