@@ -1,29 +1,41 @@
 # src/scheduler.py
 from src.database import DataLoader
-from src.utils import calculate_duration_hours
-from typing import List, Dict
+from src.utils import get_day_type_by_date, get_weekday_name
+from typing import List
 
 
 class WorkforceAnalyzer:
     def __init__(self, db: DataLoader):
         self.db = db
 
-    def generate_daily_roster(self, route_number: int, day_of_month: int, target_month: str):
-        """
-        Попытка расставить реальных людей на смены конкретного числа.
-        """
-        # 1. Находим расписание
-        # (Упрощение: считаем, что день рабочий. Потом добавим логику выходного)
-        schedule = next((s for s in self.db.schedules if s.route_number == route_number), None)
-        if not schedule:
-            return {"error": "Нет расписания"}
+    def generate_daily_roster(self, route_number: str, day_of_month: int, target_month: str, target_year: int):
 
-        # 2. Находим всех водителей, закрепленных за этим маршрутом
-        assigned_drivers = [d for d in self.db.drivers if d.assigned_route_number == route_number]
+        # ... (Код определения даты и поиска расписания - без изменений) ...
+        # (Просто скопируй начало из старого файла)
+        current_day_type = get_day_type_by_date(day_of_month, target_month, year=target_year)
+        current_day_name = get_weekday_name(day_of_month, target_month, year=target_year)
 
-        roster = []  # Сюда будем писать результат
+        schedule = next((s for s in self.db.schedules if
+                         str(s.route_number) == str(route_number) and s.day_type.lower() == current_day_type), None)
+        if not schedule: return {"error": f"Нет расписания ({current_day_type})"}
 
-        # 3. Пробегаем по трамваям
+
+        # Список 1: "СВОИ" (Штатные)
+        main_drivers = [
+            d for d in self.db.drivers
+            if str(d.assigned_route_number) == str(route_number) and d.month == target_month
+        ]
+
+        # Список 2: "РЕЗЕРВ" (ANY)
+        reserve_drivers = [
+            d for d in self.db.drivers
+            if str(d.assigned_route_number) == "ANY" and d.month == target_month
+        ]
+
+        print(f"👥 Водителей: Штатных {len(main_drivers)} | Резерв {len(reserve_drivers)}")
+
+        roster = []
+
         for tram in schedule.trams:
             tram_result = {
                 "tram_number": tram.number,
@@ -32,41 +44,50 @@ class WorkforceAnalyzer:
                 "issues": []
             }
 
-            # ПОИСК ВОДИТЕЛЯ НА 1 СМЕНУ
+
+            # 1 СМЕНА
             if tram.shift_1:
-                # Ищем того, кто:
-                # а) Закреплен (уже отфильтровали)
-                # б) В табеле на этот день стоит код работы (например "1" или "2" или "8")
-                # в) Еще не назначен никуда сегодня (в этом цикле)
-
-                candidate = self._find_driver(assigned_drivers, day_of_month, shift_type="morning")
-
-                if candidate:
-                    tram_result["shift_1_driver"] = str(candidate.id)
-                    # Важно: помечаем водителя как занятого, чтобы не клонировать его
-                    # (В реальности лучше использовать список занятых ID, но пока удалим из списка кандидатов)
-                    assigned_drivers.remove(candidate)
+                # Попытка 1: Ищем среди СВОИХ
+                cand = self._find_driver(main_drivers, day_of_month, "morning")
+                if cand:
+                    tram_result["shift_1_driver"] = str(cand.id)
+                    main_drivers.remove(cand)  # Убираем из списка доступных
                 else:
-                    tram_result["issues"].append("Не найден водитель на 1 смену!")
+                    # Попытка 2: Ищем в РЕЗЕРВЕ
+                    cand = self._find_driver(reserve_drivers, day_of_month, "morning")
+                    if cand:
+                        tram_result["shift_1_driver"] = f"{cand.id} (БЕЗ МАРШРУТА)"
+                        reserve_drivers.remove(cand)
+                    else:
+                        tram_result["issues"].append("Нет водителя (утро)")
 
-            # ПОИСК ВОДИТЕЛЯ НА 2 СМЕНУ
+            # 2 СМЕНА (Аналогично)
             if tram.shift_2:
-                candidate = self._find_driver(assigned_drivers, day_of_month, shift_type="evening")
-
-                if candidate:
-                    tram_result["shift_2_driver"] = str(candidate.id)
-                    assigned_drivers.remove(candidate)
+                # Попытка 1: СВОИ
+                cand = self._find_driver(main_drivers, day_of_month, "evening")
+                if cand:
+                    tram_result["shift_2_driver"] = str(cand.id)
+                    main_drivers.remove(cand)
                 else:
-                    tram_result["issues"].append("Не найден водитель на 2 смену!")
+                    # Попытка 2: РЕЗЕРВ
+                    cand = self._find_driver(reserve_drivers, day_of_month, "evening")
+                    if cand:
+                        tram_result["shift_2_driver"] = f"{cand.id} (БЕЗ МАРШРУТА)"
+                        reserve_drivers.remove(cand)
+                    else:
+                        tram_result["issues"].append("Нет водителя (вечер)")
 
             roster.append(tram_result)
 
         return {
             "date": day_of_month,
+            "day_type": current_day_type,
+            "day_name": current_day_name,
             "route": route_number,
             "roster": roster,
-            "drivers_leftover": [str(d.id) for d in assigned_drivers]  # Кто остался без работы
+            "drivers_leftover": [str(d.id) for d in main_drivers]
         }
+
 
     def _find_driver(self, drivers: List, day: int, shift_type: str):
         """

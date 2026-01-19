@@ -93,6 +93,8 @@ class DataLoader:
 
     def _link_drivers_to_routes(self):
         for assign in self.assignments:
-            driver = next((d for d in self.drivers if int(d.id) == int(assign.driver_id)), None)
-            if driver:
-                driver.assigned_route_number = assign.route_number
+            # Ищем водителей по ID
+            target_drivers = [d for d in self.drivers if int(d.id) == int(assign.driver_id)]
+            for d in target_drivers:
+                # ВАЖНО: Присваиваем номер маршрута как СТРОКУ
+                d.assigned_route_number = str(assign.route_number)
