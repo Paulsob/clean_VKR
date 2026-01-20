@@ -7,10 +7,10 @@ def main():
     db = DataLoader()
     db.load_all()
 
-    # 2. Настройки расчета (выносим в переменные, чтобы не путаться)
+    # 2. Настройки расчета
     selected_route = "47"
-    selected_day = 2
-    selected_month = "Февраль"
+    selected_day = 1
+    selected_month = "Январь"
     selected_year = 2026
 
     analyzer = WorkforceAnalyzer(db)
@@ -50,7 +50,7 @@ def main():
         print("-" * 30)
         print(f"Резерв (водители, оставшиеся без смены): {len(result['drivers_leftover'])} чел.")
         if result['drivers_leftover']:
-            print(f"ID резерва: {', '.join(result['drivers_leftover'])}...")  # Покажем первые 10
+            print(f"ID резерва: {', '.join(result['drivers_leftover'])}")
 
 
 if __name__ == "__main__":
