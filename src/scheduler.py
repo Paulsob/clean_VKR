@@ -1,105 +1,110 @@
 from datetime import datetime, timedelta, time
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Tuple, Optional
+from src.utils import get_day_type_by_date, get_weekday_name
 
 
 class WorkforceAnalyzer:
     def __init__(self, db):
         self.db = db
-        # { 'driver_id': {'last_end_dt': datetime, 'last_duration': float} }
-        self.history: Dict[str, dict] = {}
+        # История: { driver_id: { 'end_dt': datetime, 'duration': float } }
+        self.history = {}
 
     def load_history(self, history_data: dict):
+        """Загрузить внешнюю историю (например, из прошлого месяца)"""
         self.history = history_data
 
     def generate_daily_roster(self, route_number: str, day_of_month: int,
                               target_month: str, target_year: int, mode: str = "real"):
-
-        # ... (импорты и поиск расписания - без изменений) ...
-        from src.utils import get_day_type_by_date
+        """
+        Главный метод генерации наряда на день.
+        mode:
+          - 'strict': Водитель пропускается при нарушении отдыха.
+          - 'real': Водитель назначается, но с пометкой warning.
+        """
+        # 1. Поиск расписания
         current_day_type = get_day_type_by_date(day_of_month, target_month, year=target_year)
-
         schedule = next((s for s in self.db.schedules if
-                         str(s.route_number) == str(route_number) and s.day_type.lower() == current_day_type), None)
+                         str(s.route_number) == str(route_number) and
+                         s.day_type.lower() == current_day_type), None)
+
         if not schedule: return {"error": f"Нет расписания ({current_day_type})"}
 
+        # 2. Списки водителей
         main_drivers = [d for d in self.db.drivers if
                         str(d.assigned_route_number) == str(route_number) and d.month == target_month]
         reserve_drivers = [d for d in self.db.drivers if
                            str(d.assigned_route_number) == "ANY" and d.month == target_month]
 
-        # Сортировка вагонов (лучше по времени, но пока по номеру)
+        # 3. Подготовка
+        roster = []
+        month_map = {
+            "Январь": 1, "Февраль": 2, "Март": 3, "Апрель": 4, "Май": 5, "Июнь": 6,
+            "Июль": 7, "Август": 8, "Сентябрь": 9, "Октябрь": 10, "Ноябрь": 11, "Декабрь": 12
+        }
+        m_num = month_map.get(target_month, 2)
+        current_date = datetime(target_year, m_num, day_of_month)
+
+        # Сортируем вагоны по номеру (можно по времени выхода)
         sorted_trams = sorted(schedule.trams, key=lambda t: t.number)
 
-        roster = []
-        month_num = {"Январь": 1, "Февраль": 2, "Март": 3}.get(target_month, 1)
-        # Базовая дата дня расчета
-        current_date_base = datetime(target_year, month_num, day_of_month)
-
         for tram in sorted_trams:
-            tram_result = {
+            tram_res = {
                 "tram_number": tram.number,
                 "shift_1": {"driver": None, "warnings": []},
                 "shift_2": {"driver": None, "warnings": []},
                 "issues": []
             }
 
-            # === 1 СМЕНА ===
+            # === СМЕНА 1 (УТРО) ===
             if tram.shift_1:
-                # ПОПЫТАЙСЯ ВЗЯТЬ РЕАЛЬНОЕ ВРЕМЯ ИЗ tram
-                # Если в tram есть атрибут start_time (строка "HH:MM" или time), используй его
-                # s1_time = tram.shift_1_start_time if hasattr(tram, 'shift_1_start_time') else time(5, 0)
+                # ЗАГЛУШКА ВРЕМЕНИ (Пока нет точных данных в tram)
+                s_start = current_date + timedelta(hours=5)  # 05:00
+                s_dur = 8.0
 
-                s1_start = datetime.combine(current_date_base.date(), time(5, 0))
-                s1_dur = 8.0
-
-                cand, source, violations = self._select_best_driver(
-                    [main_drivers, reserve_drivers], day_of_month, "morning",
-                    s1_start, s1_dur
+                cand, src, warns = self._find_candidate(
+                    [main_drivers, reserve_drivers],
+                    day_of_month, "1", s_start, s_dur, mode
                 )
 
                 if cand:
-                    tram_result["shift_1"]["driver"] = f"{cand.id}" + (" (Рез)" if source == "reserve" else "")
-                    tram_result["shift_1"]["warnings"] = violations
-
-                    # Пишем в историю
+                    tram_res["shift_1"]["driver"] = f"{cand.id}" + (" (Рез)" if src == "reserve" else "")
+                    tram_res["shift_1"]["warnings"] = warns
                     self.history[str(cand.id)] = {
-                        "last_end_dt": s1_start + timedelta(hours=s1_dur),
-                        "last_duration": s1_dur
+                        'end_dt': s_start + timedelta(hours=s_dur),
+                        'duration': s_dur
                     }
-                    if source == "main":
+                    if src == "main":
                         main_drivers.remove(cand)
                     else:
                         reserve_drivers.remove(cand)
                 else:
-                    # Если даже с нарушениями никого нет - значит табель пуст
-                    tram_result["issues"].append("Нет доступных водителей в табеле")
+                    tram_res["issues"].append("Нет водителя (утро)")
 
-            # === 2 СМЕНА ===
+            # === СМЕНА 2 (ВЕЧЕР) ===
             if tram.shift_2:
-                s2_start = datetime.combine(current_date_base.date(), time(14, 0))
-                s2_dur = 8.0
+                s_start = current_date + timedelta(hours=14)  # 14:00
+                s_dur = 8.0
 
-                cand, source, violations = self._select_best_driver(
-                    [main_drivers, reserve_drivers], day_of_month, "evening",
-                    s2_start, s2_dur
+                cand, src, warns = self._find_candidate(
+                    [main_drivers, reserve_drivers],
+                    day_of_month, "2", s_start, s_dur, mode
                 )
 
                 if cand:
-                    tram_result["shift_2"]["driver"] = f"{cand.id}" + (" (Рез)" if source == "reserve" else "")
-                    tram_result["shift_2"]["warnings"] = violations
-
+                    tram_res["shift_2"]["driver"] = f"{cand.id}" + (" (Рез)" if src == "reserve" else "")
+                    tram_res["shift_2"]["warnings"] = warns
                     self.history[str(cand.id)] = {
-                        "last_end_dt": s2_start + timedelta(hours=s2_dur),
-                        "last_duration": s2_dur
+                        'end_dt': s_start + timedelta(hours=s_dur),
+                        'duration': s_dur
                     }
-                    if source == "main":
+                    if src == "main":
                         main_drivers.remove(cand)
                     else:
                         reserve_drivers.remove(cand)
                 else:
-                    tram_result["issues"].append("Нет доступных водителей в табеле")
+                    tram_res["issues"].append("Нет водителя (вечер)")
 
-            roster.append(tram_result)
+            roster.append(tram_res)
 
         return {
             "date": day_of_month,
@@ -108,73 +113,62 @@ class WorkforceAnalyzer:
             "stats": {"leftover": len(main_drivers) + len(reserve_drivers)}
         }
 
-    def _select_best_driver(self, driver_groups, day, shift_type, shift_start, shift_dur):
+    def _find_candidate(self, groups, day, target_shift_code, shift_start, shift_dur, mode):
         """
-        Теперь эта функция НИКОГДА не отфильтровывает водителя, если он есть в табеле.
-        Она просто начисляет штрафы за усталость.
+        Ищет подходящего водителя.
+        Возвращает: (driver, source_type, warnings_list)
         """
-        target_status = "1" if shift_type == "morning" else "2"
         group_names = ["main", "reserve"]
-        candidates = []
 
-        for i, drivers in enumerate(driver_groups):
+        for i, drivers in enumerate(groups):
             source = group_names[i]
+            # Сортировка внутри группы (опционально, для стабильности)
+            # drivers.sort(key=lambda d: d.id)
+
             for driver in drivers:
-                # 1. ЕДИНСТВЕННЫЙ ЖЕСТКИЙ ФИЛЬТР - ТАБЕЛЬ
-                if driver.get_status_for_day(day) != target_status:
+                # 1. Проверка Табеля (Жесткая)
+                status = driver.get_status_for_day(day)
+                # Табель "1" ждет смену "1", табель "2" ждет смену "2"
+                if status != target_shift_code:
                     continue
 
-                # Если водитель прошел этот check, он УЖЕ кандидат, даже если умирает от усталости.
+                # 2. Проверка Отдыха
+                warnings = self._check_rest(driver.id, shift_start)
 
-                score = 0
-                violations = []
+                if warnings:
+                    if mode == "strict":
+                        continue  # В строгом режиме пропускаем
+                    # В режиме real берем, warning уже записан в переменную
 
-                # 2. ПРОВЕРКА ОТДЫХА
-                hist = self.history.get(str(driver.id))
-                if hist:
-                    last_end = hist['last_end_dt']
-                    last_dur = hist['last_duration']
+                return driver, source, warnings
 
-                    # Сколько времени прошло с конца прошлой смены до начала этой
-                    hours_gap = (shift_start - last_end).total_seconds() / 3600
+        return None, None, []
 
-                    # Если gap отрицательный (накладка смен), это физически невозможно
-                    if hours_gap < 0:
-                        continue  # Это единственное исключение: человек не может быть в двух местах
+    def _check_rest(self, driver_id, current_start_dt) -> List[str]:
+        """Расчет недоотдыха"""
+        last_rec = self.history.get(str(driver_id))
+        if not last_rec:
+            return []  # Нет истории - значит отдыхал
 
-                    # Норма ежедневная
-                    daily_norm = max(12, 2 * last_dur)
+        last_end = last_rec['end_dt']
+        last_dur = last_rec['duration']
 
-                    # Определяем, нужен ли еженедельный отдых (42ч)
-                    # Если разрыв большой (например, > 24ч), считаем, что это был выходной
-                    # Правило: Если между сменами прошло больше 24 часов,
-                    # мы ожидаем, что там "поместится" 42 часа + ежедневный.
+        # Разрыв в часах
+        gap_hours = (current_start_dt - last_end).total_seconds() / 3600
 
-                    is_weekly_rest_needed = hours_gap > 24
+        # Физическая невозможность (накладка)
+        if gap_hours < 0:
+            return ["Накладка смен!"]
 
-                    required_total = daily_norm
-                    if is_weekly_rest_needed:
-                        required_total += 42
+        # Норма ежедневная
+        required = max(12, 2 * last_dur)
 
-                    # Проверка
-                    if hours_gap < required_total:
-                        shortage = required_total - hours_gap
-                        violations.append(f"Недоотдых {shortage:.1f}ч (Факт: {hours_gap:.1f}, Норма: {required_total})")
-                        score -= 1000  # Сильно понижаем приоритет, но НЕ УДАЛЯЕМ
-                    else:
-                        score += 50  # Бонус за то, что хорошо отдохнул
+        # Норма еженедельная (42ч)
+        # Логика: если разрыв большой (>24ч), считаем, что это был выходной, и добавляем 42ч
+        if gap_hours > 24:
+            required += 42
 
-                # 3. Приоритет своим перед резервом
-                if source == "main":
-                    score += 100
+        if gap_hours < required:
+            return [f"Недоотдых: {gap_hours:.1f}ч вместо {required:.1f}ч"]
 
-                candidates.append((score, driver, source, violations))
-
-        if not candidates:
-            return None, None, []
-
-        # Сортировка: Максимальный score -> Лучший кандидат
-        candidates.sort(key=lambda x: x[0], reverse=True)
-
-        best = candidates[0]
-        return best[1], best[2], best[3]
+        return []
