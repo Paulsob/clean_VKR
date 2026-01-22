@@ -1,7 +1,8 @@
 import json
 import os
 from typing import List
-from src.models import Driver, RouteSchedule, Assignment
+from src.models import Driver, RouteSchedule, Assignment, Absence
+from datetime import datetime
 
 
 class DataLoader:
@@ -10,6 +11,7 @@ class DataLoader:
         self.drivers: List[Driver] = []
         self.schedules: List[RouteSchedule] = []
         self.assignments: List[Assignment] = []
+        self.absences: List[Absence] = []
 
     def load_all(self):
         print("--- НАЧАЛО ЗАГРУЗКИ ---")
@@ -17,6 +19,7 @@ class DataLoader:
         self._load_schedules()
         self._load_assignments()
         self._link_drivers_to_routes()
+        self._load_absences()
         print("--- ЗАГРУЗКА ЗАВЕРШЕНА ---")
 
     def _load_drivers(self):
@@ -98,3 +101,29 @@ class DataLoader:
             for d in target_drivers:
                 # ВАЖНО: Присваиваем номер маршрута как СТРОКУ
                 d.assigned_route_number = str(assign.route_number)
+
+
+    def _load_absences(self):
+        """Загружает больничные и отпуска"""
+        absences_path = "data/absences.json"
+        self.absences = []
+
+        if not os.path.exists(absences_path):
+            print("Файл absences.json не найден (пропускаем)")
+            return
+
+        try:
+            with open(absences_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            for item in data.get("absences", []):
+                self.absences.append({
+                    "driver_id": str(item["driver_id"]),
+                    "type": item["type"],
+                    "from": datetime.strptime(item["from"], "%Y-%m-%d").date(),
+                    "to": datetime.strptime(item["to"], "%Y-%m-%d").date(),
+                    "comment": item.get("comment", "")
+                })
+            print(f"Загружено отсутствий: {len(self.absences)}")
+        except Exception as e:
+            print(f"Ошибка загрузки absences.json: {e}")

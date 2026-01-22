@@ -1,67 +1,60 @@
-import json
+import sys
 import os
+import json
 import calendar
-# ВАЖНО: Проверь этот импорт. Он должен указывать туда, где лежит твой class DataLoader
-from src.database import DataLoader
-# ВАЖНО: Проверь этот импорт. Он должен указывать туда, где лежит твой class WorkforceAnalyzer
-from src.scheduler import WorkforceAnalyzer
 
-# === НАСТРОЙКИ ===
-ROUTE = "47"
-MONTH = "Февраль"
-YEAR = 2026
-OUTPUT_FILE = f"data/results/simulation_{ROUTE}_{MONTH}_{YEAR}.json"
+# === МАГИЯ ПУТЕЙ ===
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.insert(0, project_root)
+os.chdir(project_root)
+
+from src.config import (
+    SELECTED_ROUTE, SELECTED_MONTH, SELECTED_YEAR, SIMULATION_MODE,
+    SIMULATION_RESULT_FILE, HISTORY_FILE
+)
+from src.database import DataLoader
+from src.scheduler import WorkforceAnalyzer
 
 
 def main():
-    print(f"--- ЗАПУСК МОДЕЛИРОВАНИЯ: {MONTH} {YEAR}, Маршрут {ROUTE} ---")
+    print(f"--- ЗАПУСК СИМУЛЯЦИИ ---")
+    print(f"Папка запуска: {os.getcwd()}")
+    print(f"Конфиг: {SELECTED_ROUTE}, {SELECTED_MONTH} {SELECTED_YEAR}, Mode={SIMULATION_MODE}")
 
-    # 1. Загрузка данных
-    try:
-        db = DataLoader()
-        db.load_all()
-    except Exception as e:
-        print(f"❌ Ошибка загрузки данных: {e}")
-        return
+    db = DataLoader()
+    db.load_all()
 
     analyzer = WorkforceAnalyzer(db)
 
-    # Карта месяцев
-    month_map = {
-        "Январь": 1, "Февраль": 2, "Март": 3, "Апрель": 4, "Май": 5, "Июнь": 6,
-        "Июль": 7, "Август": 8, "Сентябрь": 9, "Октябрь": 10, "Ноябрь": 11, "Декабрь": 12
-    }
-    month_num = month_map.get(MONTH, 2)
-    _, days_in_month = calendar.monthrange(YEAR, month_num)
+    # Карту месяцев можно вынести в utils, но пока пусть будет здесь
+    month_map = {"Январь": 1, "Февраль": 2, "Март": 3, "Апрель": 4,
+                 "Май": 5, "Июнь": 6, "Июль": 7, "Август": 8,
+                 "Сентябрь": 9, "Октябрь": 10, "Ноябрь": 11, "Декабрь": 12}
 
-    full_month_results = {}
+    _, days_in_month = calendar.monthrange(SELECTED_YEAR, month_map.get(SELECTED_MONTH, 2))
 
-    # 2. Цикл по дням
+    full_results = {}
+
+    print("Расчет дней:", end=" ")
     for day in range(1, days_in_month + 1):
-        print(f"Расчет дня: {day}/{days_in_month}...", end="\r")
+        print(f".", end="", flush=True)
+        res = analyzer.generate_daily_roster(
+            SELECTED_ROUTE, day, SELECTED_MONTH, SELECTED_YEAR, mode=SIMULATION_MODE
+        )
+        full_results[str(day)] = res
+    print("\nГотово.")
 
-        try:
-            day_result = analyzer.generate_daily_roster(
-                route_number=ROUTE,
-                day_of_month=day,
-                target_month=MONTH,
-                target_year=YEAR
-            )
-            full_month_results[str(day)] = day_result
-        except Exception as e:
-            print(f"\n❌ Ошибка при расчете дня {day}: {e}")
-            full_month_results[str(day)] = {"error": str(e)}
+    # Сохранение результатов
+    os.makedirs(os.path.dirname(SIMULATION_RESULT_FILE), exist_ok=True)
+    with open(SIMULATION_RESULT_FILE, "w", encoding="utf-8") as f:
+        json.dump(full_results, f, ensure_ascii=False, indent=2, default=str)
+    print(f"Результаты: {SIMULATION_RESULT_FILE}")
 
-    print(f"\n✅ Готово! Расчет завершен.")
-
-    # 3. Сохранение
-    os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        # default=str нужен, чтобы даты/время превратились в строки, если они есть
-        json.dump(full_month_results, f, ensure_ascii=False, indent=2, default=str)
-
-    print(f"Результаты сохранены: {OUTPUT_FILE}")
+    # Сохранение истории
+    os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(analyzer.get_history_serializable(), f, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":
