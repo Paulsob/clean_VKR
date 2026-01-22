@@ -1,5 +1,5 @@
-from src.database import DataLoader
-from src.scheduler import WorkforceAnalyzer
+from src.prepare_data.database import DataLoader
+from src.core.scheduler import WorkforceAnalyzer
 
 
 def main():

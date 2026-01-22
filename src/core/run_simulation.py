@@ -13,8 +13,8 @@ from src.config import (
     SELECTED_ROUTE, SELECTED_MONTH, SELECTED_YEAR, SIMULATION_MODE,
     SIMULATION_RESULT_FILE, HISTORY_FILE
 )
-from src.database import DataLoader
-from src.scheduler import WorkforceAnalyzer
+from src.prepare_data.database import DataLoader
+from src.core.scheduler import WorkforceAnalyzer
 
 
 def main():

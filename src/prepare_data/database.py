@@ -1,7 +1,7 @@
 import json
 import os
 from typing import List
-from src.models import Driver, RouteSchedule, Assignment, Absence
+from src.prepare_data.models import Driver, RouteSchedule, Assignment, Absence
 from datetime import datetime
 
 

@@ -3,7 +3,6 @@ import os
 import json
 import pandas as pd
 from datetime import datetime
-from openpyxl import load_workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 # === НАСТРОЙКА ПУТЕЙ ===
@@ -16,7 +15,7 @@ from src.config import (
     SELECTED_ROUTE, SELECTED_MONTH, SELECTED_YEAR,
     SIMULATION_RESULT_FILE, REPORT_FILE
 )
-from src.database import DataLoader
+from src.prepare_data.database import DataLoader
 
 
 def load_absences():
