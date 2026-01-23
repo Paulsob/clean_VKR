@@ -3,7 +3,6 @@ import calendar
 from pathlib import Path
 from openpyxl import load_workbook
 
-# --- Пути ---
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
 
@@ -125,10 +124,12 @@ def main():
             rows = [list(row) for row in sheet.iter_rows(values_only=True)]
             drivers = parse_whole_sheet(rows, en_month, YEAR)
 
+            month_num = EN_MONTH_TO_NUM[en_month]
+
             # Имя файла: drivers_january.json
-            output_file = OUTPUT_DIR / f"drivers_{en_month}.json"
+            output_file = OUTPUT_DIR / f"{month_num:02d}_drivers_{en_month}.json"
             result_data = {
-                "month": ru_month,  # Внутри — по-русски, как вы просили
+                "month": ru_month,
                 "year": YEAR,
                 "drivers": drivers
             }

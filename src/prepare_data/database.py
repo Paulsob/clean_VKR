@@ -17,8 +17,8 @@ class DataLoader:
         print("--- НАЧАЛО ЗАГРУЗКИ ---")
         self._load_drivers()
         self._load_schedules()
-        self._load_assignments()
-        self._link_drivers_to_routes()
+        self._load_assignments()                # загрузка закреплений
+        self._link_drivers_to_routes()          # применение связи водитель <-> маршрут
         self._load_absences()
         print("--- ЗАГРУЗКА ЗАВЕРШЕНА ---")
 
@@ -63,7 +63,7 @@ class DataLoader:
                         self.drivers.append(driver)
                         count += 1
 
-                    print(f"   📄 {filename}: Загружен {month_name} {year} ({count} вод.)")
+                    print(f"   📄 {filename}: Загружен {month_name} {year} ({count} водителей)")
 
             except json.JSONDecodeError as e:
                 print(f"Ошибка JSON в файле {filename}: {e}")
@@ -85,6 +85,10 @@ class DataLoader:
             print(f"Ошибка schedule.json: {e}")
 
     def _load_assignments(self):
+        """
+        Загружает сырые данные из assignmemts.json,
+        заполняет список связей водитель <-> маршрут self.assignments
+        """
         path = os.path.join(self.data_folder, "assignments.json")
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -95,6 +99,11 @@ class DataLoader:
             print("Файл assignments.json не найден (пропускаем)")
 
     def _link_drivers_to_routes(self):
+        """
+        Устанавливает связи: находит водителя по driver_id и приписывает ему assigned_route_number
+        Данные берет из self.assignments и self.drivers
+        Модифицирует атрибуты объектов Driver
+        """
         for assign in self.assignments:
             # Ищем водителей по ID
             target_drivers = [d for d in self.drivers if int(d.id) == int(assign.driver_id)]

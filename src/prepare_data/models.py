@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import List, Optional, Union
 
 
-# --- Вспомогательная модель для одного дня ---
+# --- Вспомогательная модель для одного дня. Используется внутри Driver для хранения табеля ---
 class DayStatus(BaseModel):
     day: int
     value: str
@@ -15,7 +15,7 @@ class Driver(BaseModel):
     schedule_pattern: str = Field(alias="schedule")
     shift_preference: str = Field(alias="mode")
     days_list: List[DayStatus] = Field(alias="days")
-    assigned_route_number: Optional[str] = None  # Теперь храним как строку!
+    assigned_route_number: Optional[str] = None
     month: Optional[str] = None
 
     def get_status_for_day(self, day_num: int) -> str:

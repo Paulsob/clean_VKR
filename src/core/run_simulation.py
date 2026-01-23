@@ -3,7 +3,6 @@ import os
 import json
 import calendar
 
-# === МАГИЯ ПУТЕЙ ===
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 sys.path.insert(0, project_root)
@@ -26,6 +25,16 @@ def main():
     db.load_all()
 
     analyzer = WorkforceAnalyzer(db)
+
+    # Загружаем историю за декабрь для выбранного маршрута
+    dec_history_path = f"history/december_2025/history_{SELECTED_ROUTE}_Декабрь_2025.json"
+    if os.path.exists(dec_history_path):
+        with open(dec_history_path, "r", encoding="utf-8") as f:
+            dec_data = json.load(f)
+            analyzer.load_history(dec_data)
+            print(f"Загружена история за декабрь: {len(dec_data)} водителей.")
+    else:
+        print("Предупреждение: Файл истории декабря не найден. Отдых в начале января будет >48.")
 
     # Карту месяцев можно вынести в utils, но пока пусть будет здесь
     month_map = {"Январь": 1, "Февраль": 2, "Март": 3, "Апрель": 4,

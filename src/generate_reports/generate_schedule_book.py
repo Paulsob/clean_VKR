@@ -12,10 +12,10 @@ os.chdir(project_root)
 
 from src.config import (
     SELECTED_ROUTE, SELECTED_MONTH, SELECTED_YEAR,
-    SIMULATION_RESULT_FILE, OUTPUTS_DIR
+    SIMULATION_RESULT_FILE, OUTPUTS_DIR, SCHEDULE_BOOK_REPORT_FILE
 )
 
-OUTPUT_FILE = os.path.join(OUTPUTS_DIR, f"schedule_book_{SELECTED_ROUTE}_{SELECTED_MONTH}.xlsx")
+# OUTPUT_FILE = os.path.join(OUTPUTS_DIR, f"schedule_book_{SELECTED_ROUTE}_{SELECTED_MONTH}.xlsx")
 
 MONTH_TO_NUM = {
     "Январь": "01",
@@ -96,8 +96,8 @@ def main():
     df = pd.DataFrame(rows)
 
     # Сохраняем
-    os.makedirs(OUTPUTS_DIR, exist_ok=True)
-    writer = pd.ExcelWriter(OUTPUT_FILE, engine='openpyxl')
+    os.makedirs(os.path.dirname(SCHEDULE_BOOK_REPORT_FILE), exist_ok=True)
+    writer = pd.ExcelWriter(SCHEDULE_BOOK_REPORT_FILE, engine='openpyxl')
     df.to_excel(writer, index=False, sheet_name="Журнал")
 
     # Оформление
@@ -168,7 +168,7 @@ def main():
 
 
     writer.close()
-    print(f"✅ Детальный журнал создан: {OUTPUT_FILE}")
+    print(f"✅ Детальный журнал создан: {SCHEDULE_BOOK_REPORT_FILE}")
 
 
 if __name__ == "__main__":

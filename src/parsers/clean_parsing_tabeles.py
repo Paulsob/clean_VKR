@@ -8,7 +8,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
 # ================= НАСТРОЙКИ =================
-INPUT_FILE = '../../data/tabeles_2026/february_2026.xlsx'
+INPUT_FILE = '../../data/tabeles_2026/02_february_2026.xlsx'
 OUTPUT_DIR = '../../data/tabeles_2026'
 
 SHIFT_1 = 1
@@ -311,7 +311,7 @@ def main():
                7: 'july', 8: 'august', 9: 'september', 10: 'october', 11: 'november', 12: 'december'}
 
     for m in months:
-        fname = f"{m_names[m]}_2026.xlsx"
+        fname = f"{m:02d}_{m_names[m]}_2026.xlsx"
         print(f"Создаем {fname}...")
 
         _, days_cnt = calendar.monthrange(2026, m)

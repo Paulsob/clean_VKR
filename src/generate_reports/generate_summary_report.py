@@ -13,7 +13,7 @@ os.chdir(project_root)
 
 from src.config import (
     SELECTED_ROUTE, SELECTED_MONTH, SELECTED_YEAR,
-    SIMULATION_RESULT_FILE, REPORT_FILE
+    SIMULATION_RESULT_FILE, SUMMARY_REPORT_FILE
 )
 from src.prepare_data.database import DataLoader
 
@@ -107,7 +107,11 @@ def main():
                         wh = s_info.get("work_hours", 8.0)
                         rest = s_info.get("rest_before", 0)
 
-                        rest_str = f"{rest:.0f}" if rest < 100 else ">48"
+                        if rest > 500:
+                            rest_str = "—"
+                        else:
+                            rest_str = f"{rest:.0f}"
+
                         val = f"{wh:.1f}ч (отд {rest_str})"
                         if s_info.get("warnings"): val += " (!)"
 
@@ -189,7 +193,7 @@ def main():
     rows = []
 
     # Заголовок группы "АКТИВНЫЕ"
-    header_active = {"Таб.№": "═══ РАБОЧЕЕ ЯДРО ═══", "Смен": "", "Часов": "", "Резерв (дн)": ""}
+    header_active = {"Таб.№": "РАБОЧЕЕ ЯДРО", "Смен": "", "Часов": "", "Резерв (дн)": ""}
     for day in all_days: header_active[day] = ""
     rows.append(header_active)
 
@@ -202,7 +206,7 @@ def main():
     rows.append(separator)
 
     # Заголовок группы "РЕЗЕРВ"
-    header_reserve = {"Таб.№": "═══ ИЗБЫТОЧНЫЙ РЕЗЕРВ ═══", "Смен": "", "Часов": "", "Резерв (дн)": ""}
+    header_reserve = {"Таб.№": "ИЗБЫТОЧНЫЙ РЕЗЕРВ", "Смен": "", "Часов": "", "Резерв (дн)": ""}
     for day in all_days: header_reserve[day] = ""
     rows.append(header_reserve)
 
@@ -225,8 +229,8 @@ def main():
     df = pd.DataFrame(rows)
 
     # 6. Экспорт в Excel
-    os.makedirs(os.path.dirname(REPORT_FILE), exist_ok=True)
-    writer = pd.ExcelWriter(REPORT_FILE, engine='openpyxl')
+    os.makedirs(os.path.dirname(SUMMARY_REPORT_FILE), exist_ok=True)
+    writer = pd.ExcelWriter(SUMMARY_REPORT_FILE, engine='openpyxl')
     df.to_excel(writer, index=False, sheet_name="Сводный отчет")
 
     # Оформление
@@ -291,7 +295,7 @@ def main():
     print(f"В избытке (ни разу не вышли): {total_reserve}")
     print(f"Всего по табелю: {total_all}")
     print("=" * 50)
-    print(f"✅ Отчет сохранен: {REPORT_FILE}")
+    print(f"✅ Отчет сохранен: {SUMMARY_REPORT_FILE}")
 
 
 if __name__ == "__main__":
