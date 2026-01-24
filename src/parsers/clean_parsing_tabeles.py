@@ -1,11 +1,22 @@
 import pandas as pd
 import numpy as np
 import os
+import sys
 import calendar
 from datetime import date, timedelta
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
+
+# Добавляем путь к корню проекта для импорта логгера
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.insert(0, project_root)
+
+from src.logger import get_logger
+
+# Инициализируем логгер для этого модуля
+logger = get_logger(__name__)
 
 # ================= НАСТРОЙКИ =================
 INPUT_FILE = '../../data/tabeles_2026/02_february_2026.xlsx'
@@ -169,7 +180,7 @@ def solve_5x2(feb_vals, mode):
     feb_slice = full_seq[31:59]
     matches = sum(1 for i in range(28) if str(feb_vals[i]).replace('.0', '') == str(feb_slice[i]))
     if matches < 15:
-        print("Предупреждение: 5х2 не совпало более чем на 50%")
+        logger.warning("5х2 график не совпал более чем на 50% с февралем")
 
     return full_seq
 
@@ -199,7 +210,7 @@ def format_excel_file(filepath, month_num):
     try:
         col_vyh_index = col_names.index('вых.') + 1  # +1 потому что openpyxl индексирует с 1
     except ValueError:
-        print(f"В файле {filepath} не найдена колонка 'вых.'. Пропуск форматирования этой колонки.")
+        logger.warning(f"В файле {filepath} не найдена колонка 'вых.'. Пропуск форматирования этой колонки")
         col_vyh_index = None
 
     # Проходим по всем строкам (начиная со 2-й, т.к. 1-я — заголовки)
@@ -260,10 +271,10 @@ def format_excel_file(filepath, month_num):
 # ================= MAIN =================
 
 def main():
-    print("--- Генератор табелей v5 (Специальные графики + Форматирование) ---")
+    logger.info("Запуск генератора табелей v5 (Специальные графики + Форматирование)")
 
     if not os.path.exists(INPUT_FILE):
-        print("Файл не найден")
+        logger.error("Входной файл не найден")
         return
 
     df = pd.read_excel(INPUT_FILE, dtype=str)
@@ -299,10 +310,10 @@ def main():
             full_year_map[idx] = result_seq
             stats_ok += 1
         else:
-            print(f"Строка {idx}: Не удалось построить график {grafik}")
+            logger.warning(f"Строка {idx}: Не удалось построить график {grafik}")
             full_year_map[idx] = [""] * 365
 
-    print(f"Успешно обработано: {stats_ok}")
+    logger.info(f"Успешно обработано: {stats_ok} графиков")
 
     if not os.path.exists(OUTPUT_DIR): os.makedirs(OUTPUT_DIR)
 
@@ -313,6 +324,7 @@ def main():
     for m in months:
         fname = f"{m:02d}_{m_names[m]}_2026.xlsx"
         print(f"Создаем {fname}...")
+        logger.info(f"Создание файла {fname}")
 
         _, days_cnt = calendar.monthrange(2026, m)
         doy_start = date(2026, m, 1).timetuple().tm_yday - 1
@@ -331,9 +343,9 @@ def main():
 
         # Применяем форматирование
         format_excel_file(out_path, m)
-        print(f" -> Форматирование применено.")
+        logger.debug("Форматирование применено")
 
-    print("✅ Все готово!")
+    logger.info("Все файлы готовы!")
 
 
 if __name__ == "__main__":

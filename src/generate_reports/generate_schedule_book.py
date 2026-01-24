@@ -14,6 +14,10 @@ from src.config import (
     SELECTED_ROUTE, SELECTED_MONTH, SELECTED_YEAR,
     SIMULATION_RESULT_FILE, OUTPUTS_DIR, SCHEDULE_BOOK_REPORT_FILE
 )
+from src.logger import get_logger
+
+# Инициализируем логгер для этого модуля
+logger = get_logger(__name__)
 
 # OUTPUT_FILE = os.path.join(OUTPUTS_DIR, f"schedule_book_{SELECTED_ROUTE}_{SELECTED_MONTH}.xlsx")
 
@@ -34,21 +38,29 @@ MONTH_TO_NUM = {
 
 
 def main():
-    print(f"--- ГЕНЕРАЦИЯ ЖУРНАЛА НАРЯДОВ ---")
+    logger.info("Начинаем генерацию журнала нарядов")
+    logger.debug(f"Маршрут: {SELECTED_ROUTE}, Месяц: {SELECTED_MONTH}, Год: {SELECTED_YEAR}")
 
     if not os.path.exists(SIMULATION_RESULT_FILE):
-        print("Файл симуляции не найден. Запустите run_simulation.py")
+        logger.error(f"Файл симуляции не найден: {SIMULATION_RESULT_FILE}")
+        logger.info("Для создания файла симуляции запустите run_simulation.py")
         return
 
-    with open(SIMULATION_RESULT_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(SIMULATION_RESULT_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        logger.debug(f"Загружен файл симуляции с {len(data)} записями")
+    except Exception as e:
+        logger.error(f"Ошибка при чтении файла симуляции: {SIMULATION_RESULT_FILE}", exc_info=True)
+        return
 
     # Сортируем дни (1, 2, 3...)
     days_sorted = sorted([k for k in data.keys() if k.isdigit()], key=int)
+    logger.debug(f"Найдено дней для обработки: {len(days_sorted)}")
 
     rows = []
 
-    print("Формирование строк...")
+    logger.info("Формирование строк отчета...")
     for day_str in days_sorted:
         day_res = data[day_str]
         roster = day_res.get("roster", [])
@@ -56,21 +68,21 @@ def main():
         # Сортируем вагоны по номеру (как числа)
         try:
             roster.sort(key=lambda x: int(x.get("tram_number", 0)))
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"Не удалось отсортировать вагоны для дня {day_str}: {e}")
 
         for tram in roster:
             t_num = tram.get("tram_number", "?")
 
             # Данные 1 смены
             s1 = tram.get("shift_1") or {}
-            d1 = s1.get("driver", "")
+            d1 = s1.get("driver_name", "")
             t1 = s1.get("time_range", "")
             w1 = "(!)" if s1.get("warnings") else ""
 
             # Данные 2 смены
             s2 = tram.get("shift_2") or {}
-            d2 = s2.get("driver", "")
+            d2 = s2.get("driver_name", "")
             t2 = s2.get("time_range", "")
             w2 = "(!)" if s2.get("warnings") else ""
 
@@ -94,11 +106,17 @@ def main():
 
     # Создаем DataFrame
     df = pd.DataFrame(rows)
+    logger.debug(f"Создан DataFrame с {len(df)} строками")
 
     # Сохраняем
-    os.makedirs(os.path.dirname(SCHEDULE_BOOK_REPORT_FILE), exist_ok=True)
-    writer = pd.ExcelWriter(SCHEDULE_BOOK_REPORT_FILE, engine='openpyxl')
-    df.to_excel(writer, index=False, sheet_name="Журнал")
+    try:
+        os.makedirs(os.path.dirname(SCHEDULE_BOOK_REPORT_FILE), exist_ok=True)
+        writer = pd.ExcelWriter(SCHEDULE_BOOK_REPORT_FILE, engine='openpyxl')
+        df.to_excel(writer, index=False, sheet_name="Журнал")
+        logger.debug("DataFrame записан в Excel файл")
+    except Exception as e:
+        logger.error(f"Ошибка при создании Excel файла: {SCHEDULE_BOOK_REPORT_FILE}", exc_info=True)
+        return
 
     # Оформление
     ws = writer.book.active
@@ -168,7 +186,7 @@ def main():
 
 
     writer.close()
-    print(f"✅ Детальный журнал создан: {SCHEDULE_BOOK_REPORT_FILE}")
+    logger.info(f"Журнал нарядов успешно создан: {SCHEDULE_BOOK_REPORT_FILE}")
 
 
 if __name__ == "__main__":

@@ -1,10 +1,19 @@
 import json
 import calendar
+import sys
 from pathlib import Path
 from openpyxl import load_workbook
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent.parent
+
+# Добавляем путь к корню проекта для импорта логгера
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.logger import get_logger
+
+# Инициализируем логгер для этого модуля
+logger = get_logger(__name__)
 
 TABELS_DIR = PROJECT_ROOT / "data" / "tabeles_2026"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "drivers_json"
@@ -108,16 +117,16 @@ def main():
     for file_path in files:
         en_month = extract_english_month(file_path.name)
         if not en_month:
-            print(f"⚠️ Пропущен файл (не распознан месяц): {file_path.name}")
+            logger.warning(f"Пропущен файл (не распознан месяц): {file_path.name}")
             continue
 
         ru_month = EN_TO_RU_MONTH[en_month]
-        print(f"Обрабатываю: {file_path.name} → {ru_month} {YEAR}")
+        logger.info(f"Обрабатываю: {file_path.name} → {ru_month} {YEAR}")
 
         try:
             workbook = load_workbook(file_path, data_only=True)
             if SHEET_NAME not in workbook.sheetnames:
-                print(f"  ❌ Лист '{SHEET_NAME}' не найден в {file_path.name}")
+                logger.error(f"Лист '{SHEET_NAME}' не найден в {file_path.name}")
                 continue
 
             sheet = workbook[SHEET_NAME]
@@ -140,10 +149,10 @@ def main():
             processed += 1
 
         except Exception as e:
-            print(f"  ❌ Ошибка при обработке {file_path.name}: {e}")
+            logger.error(f"Ошибка при обработке {file_path.name}: {e}")
 
-    print(f"\n✅ Успешно обработано {processed} месяцев.")
-    print(f"Файлы сохранены в: {OUTPUT_DIR.absolute()}")
+    logger.info(f"Успешно обработано {processed} месяцев")
+    logger.info(f"Файлы сохранены в: {OUTPUT_DIR.absolute()}")
 
 
 if __name__ == "__main__":

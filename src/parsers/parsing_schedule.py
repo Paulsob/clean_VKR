@@ -2,6 +2,17 @@ import pandas as pd
 import re
 import json
 import os
+import sys
+
+# Добавляем путь к корню проекта для импорта логгера
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+sys.path.insert(0, project_root)
+
+from src.logger import get_logger
+
+# Инициализируем логгер для этого модуля
+logger = get_logger(__name__)
 
 os.makedirs("../../data", exist_ok=True)
 output_path = "../../data/schedule.json"
@@ -46,7 +57,7 @@ def format_time(value):
 
 
 for sheet_name in sheet_names:
-    print(f"Обработка листа: {sheet_name}")
+    logger.info(f"Обработка листа: {sheet_name}")
 
     df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, engine='openpyxl')
     df.iloc[:, 0] = df.iloc[:, 0].ffill()  # заполняем объединённые ячейки
@@ -120,4 +131,4 @@ for sheet_name in sheet_names:
 with open(output_path, 'w', encoding='utf-8') as f:
     json.dump(all_schedules, f, ensure_ascii=False, indent=2)
 
-print(f"\n✅ Успешно сохранено {len(all_schedules)} расписаний в {output_path}")
+logger.info(f"Успешно сохранено {len(all_schedules)} расписаний в {output_path}")

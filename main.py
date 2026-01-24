@@ -1,5 +1,9 @@
 from src.prepare_data.database import DataLoader
 from src.core.scheduler import WorkforceAnalyzer
+from src.logger import get_logger
+
+# Инициализируем логгер для этого модуля
+logger = get_logger(__name__)
 
 
 def main():
@@ -15,7 +19,7 @@ def main():
 
     analyzer = WorkforceAnalyzer(db)
 
-    print(f"\n--- ГЕНЕРАЦИЯ НАРЯДА: {selected_day} {selected_month} {selected_year} ---")
+    logger.info(f"Генерация наряда: {selected_day} {selected_month} {selected_year}")
 
     result = analyzer.generate_daily_roster(
         route_number=selected_route,
@@ -25,8 +29,10 @@ def main():
     )
 
     if "error" in result:
+        logger.error(f"Ошибка генерации наряда: {result['error']}")
         print(f"⛔ ОШИБКА ГЕНЕРАЦИИ: {result['error']}")
     else:
+        logger.info(f"Наряд успешно сгенерирован для маршрута {selected_route}")
         print("\n" + "="*60)
         print(f"📄 РЕЗУЛЬТАТ: Маршрут №{selected_route}")
         print(f"📅 Дата: {result['date']} {selected_month} {selected_year}")
@@ -39,8 +45,8 @@ def main():
             v_driver = tram['shift_2_driver'] or '❌ ПУСТО'
 
             print(f"Вагон {tram['tram_number']}:")
-            print(f"  🌞 Утро : {u_driver}")
-            print(f"  🌜 Вечер: {v_driver}")
+            print(f"  � Утро : {u_driver}")
+            print(f"  �🌜 Вечер: {v_driver}")
 
             # Если есть проблемы (например, не нашли водителя)
             if tram['issues']:
@@ -51,6 +57,8 @@ def main():
         print(f"Резерв (водители, оставшиеся без смены): {len(result['drivers_leftover'])} чел.")
         if result['drivers_leftover']:
             print(f"ID резерва: {', '.join(result['drivers_leftover'])}")
+        
+        logger.debug(f"Резерв: {len(result['drivers_leftover'])} водителей")
 
 
 if __name__ == "__main__":

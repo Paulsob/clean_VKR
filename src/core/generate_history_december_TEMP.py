@@ -18,7 +18,7 @@ TARGET_YEAR = 2025
 TARGET_MONTH_NAME = "Декабрь"
 START_DAY = 24
 END_DAY = 31
-HISTORY_DIR = "history/december_2025"
+HISTORY_DIR = "history/12_Декабрь_2025"
 
 
 # =============================================

@@ -53,3 +53,24 @@ def calculate_duration_hours(start_str: str, end_str: str) -> float:
         end += timedelta(days=1)
     duration = end - start
     return round(duration.total_seconds() / 3600, 2)
+
+
+def get_month_number(month_name: str) -> int:
+    months = [
+        "Январь",
+        "Февраль",
+        "Март",
+        "Апрель",
+        "Май",
+        "Июнь",
+        "Июль",
+        "Август",
+        "Сентябрь",
+        "Октябрь",
+        "Ноябрь",
+        "Декабрь"
+    ]
+    if month_name in months:
+        return months.index(month_name) + 1
+    else:
+        raise ValueError(f"Unknown month: {month_name}")

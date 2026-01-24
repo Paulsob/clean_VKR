@@ -2,7 +2,11 @@ import json
 import os
 from typing import List
 from src.prepare_data.models import Driver, RouteSchedule, Assignment, Absence
+from src.logger import get_logger
 from datetime import datetime
+
+# Инициализируем логгер для этого модуля
+logger = get_logger(__name__)
 
 
 class DataLoader:
@@ -14,13 +18,13 @@ class DataLoader:
         self.absences: List[Absence] = []
 
     def load_all(self):
-        print("--- НАЧАЛО ЗАГРУЗКИ ---")
+        logger.info("Начинаем загрузку данных")
         self._load_drivers()
         self._load_schedules()
         self._load_assignments()                # загрузка закреплений
         self._link_drivers_to_routes()          # применение связи водитель <-> маршрут
         self._load_absences()
-        print("--- ЗАГРУЗКА ЗАВЕРШЕНА ---")
+        logger.info("Загрузка данных завершена")
 
     def _load_drivers(self):
         # Путь к папке с JSON-ами месяцев
@@ -28,16 +32,16 @@ class DataLoader:
 
         # Проверяем, существует ли папка
         if not os.path.exists(drivers_dir):
-            print(f"Ошибка: Папка {drivers_dir} не найдена!")
+            logger.error(f"Папка водителей не найдена: {drivers_dir}")
             return
 
-        print(f"Сканирую папку: {drivers_dir} ...")
+        logger.info(f"Сканирую папку водителей: {drivers_dir}")
 
         # Получаем список всех файлов в папке
         files = [f for f in os.listdir(drivers_dir) if f.endswith('.json')]
 
         if not files:
-            print("В папке нет JSON файлов!")
+            logger.warning("В папке нет JSON файлов с водителями")
             return
 
         self.drivers = []
@@ -63,15 +67,15 @@ class DataLoader:
                         self.drivers.append(driver)
                         count += 1
 
-                    print(f"   📄 {filename}: Загружен {month_name} {year} ({count} водителей)")
+                    logger.debug(f"Загружен файл {filename}: {month_name} {year} ({count} водителей)")
 
             except json.JSONDecodeError as e:
-                print(f"Ошибка JSON в файле {filename}: {e}")
-                print("(Проверь, нет ли у тебя чисел вида 0009 без кавычек?)")
+                logger.error(f"Ошибка JSON в файле {filename}: {e}")
+                logger.warning("Проверьте, нет ли чисел вида 0009 без кавычек")
             except Exception as e:
-                print(f"Ошибка чтения {filename}: {e}")
+                logger.error(f"Ошибка чтения файла {filename}: {e}")
 
-        print(f"Всего загружено водителей (сумма по всем месяцам): {len(self.drivers)}")
+        logger.info(f"Всего загружено водителей: {len(self.drivers)}")
 
     def _load_schedules(self):
         path = os.path.join(self.data_folder, "schedule.json")
@@ -80,9 +84,9 @@ class DataLoader:
                 data = json.load(f)
                 if isinstance(data, dict): data = [data]
                 self.schedules = [RouteSchedule(**s) for s in data]
-            print(f"Расписание: {len(self.schedules)} маршрутов")
+            logger.info(f"Загружено расписаний: {len(self.schedules)} маршрутов")
         except Exception as e:
-            print(f"Ошибка schedule.json: {e}")
+            logger.error(f"Ошибка загрузки schedule.json: {e}")
 
     def _load_assignments(self):
         """
@@ -94,9 +98,9 @@ class DataLoader:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 self.assignments = [Assignment(**a) for a in data]
-            print(f"Закрепления: {len(self.assignments)} связей")
+            logger.info(f"Загружено закреплений: {len(self.assignments)} связей")
         except FileNotFoundError:
-            print("Файл assignments.json не найден (пропускаем)")
+            logger.warning("Файл assignments.json не найден (пропускаем)")
 
     def _link_drivers_to_routes(self):
         """
@@ -118,7 +122,7 @@ class DataLoader:
         self.absences = []
 
         if not os.path.exists(absences_path):
-            print("Файл absences.json не найден (пропускаем)")
+            logger.warning("Файл absences.json не найден (пропускаем)")
             return
 
         try:
@@ -133,6 +137,6 @@ class DataLoader:
                     "to": datetime.strptime(item["to"], "%Y-%m-%d").date(),
                     "comment": item.get("comment", "")
                 })
-            print(f"Загружено отсутствий: {len(self.absences)}")
+            logger.info(f"Загружено отсутствий: {len(self.absences)}")
         except Exception as e:
-            print(f"Ошибка загрузки absences.json: {e}")
+            logger.error(f"Ошибка загрузки absences.json: {e}")
