@@ -1,20 +1,30 @@
 import sys
 import os
 import json
-from datetime import datetime
+import random
+import logging  # Добавили для управления уровнями логов
+from datetime import datetime, timedelta
 
-# Пути (используем абсолютные пути, не меняя рабочую директорию)
+# --- НАСТРОЙКА ПУТЕЙ ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
-sys.path.insert(0, project_root)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-from src.logger import get_logger, get_file_only_logger
+try:
+    from src.logger import get_logger, get_file_only_logger
+    from src.prepare_data.database import DataLoader
+    import src.config as config
+except ImportError as e:
+    print(f"Ошибка импорта: {e}")
+    sys.exit(1)
 
-# Инициализируем логгер только для файлов (не выводит в консоль)
-logger = get_file_only_logger(__name__)
-
+# Логгер только для этого файла (пишет в файл)
+logger = get_file_only_logger("absences_manager")
 ABSENCES_FILE = os.path.join(project_root, "data", "absences.json")
 
+
+# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 
 def load_absences():
     if not os.path.exists(ABSENCES_FILE):
@@ -30,25 +40,7 @@ def save_absences(data):
     os.makedirs(os.path.dirname(ABSENCES_FILE), exist_ok=True)
     with open(ABSENCES_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    logger.debug(f"Сохранено {len(data.get('absences', []))} записей об отсутствиях")
-
-
-def show_all():
-    data = load_absences()
-    print("\n=== ТЕКУЩИЕ ОТСУТСТВИЯ ===")
-    if not data["absences"]:
-        print("Список пуст.")
-        return
-    # Сортируем для удобства (сначала новые)
-    sorted_absences = sorted(data["absences"], key=lambda x: x['from'])
-
-    for i, item in enumerate(sorted_absences, 1):
-        t = "Больничный" if item["type"] == "sick" else "Отпуск"
-        # Для удобства показываем оригинальный индекс, чтобы можно было удалить
-        print(f"{i}. Таб.№{item['driver_id']} | {t} | {item['from']} - {item['to']} | {item.get('comment', '')}")
-    
-    # Этот лог пойдет только в файл, не в консоль
-    logger.info(f"Показано {len(data['absences'])} записей об отсутствиях")
+    logger.debug(f"Сохранено {len(data.get('absences', []))} записей")
 
 
 def validate_date(date_text):
@@ -60,95 +52,79 @@ def validate_date(date_text):
 
 
 def check_overlap(start1, end1, start2, end2):
-    """
-    Возвращает True, если интервалы пересекаются.
-    start1, end1, start2, end2 - объекты datetime
-    """
     return max(start1, start2) <= min(end1, end2)
 
 
+def get_type_name(t_code):
+    if t_code == "sick": return "Больничный"
+    if t_code == "vacation": return "Отпуск"
+    if t_code == "other": return "Прочее"
+    return t_code
+
+
+# --- ФУНКЦИИ ИНТЕРФЕЙСА ---
+
+def show_all():
+    data = load_absences()
+    print("\n=== ТЕКУЩИЕ ОТСУТСТВИЯ ===")
+    if not data["absences"]:
+        print("Список пуст.")
+        return
+
+    # Сортировка: сначала реальные, потом симуляции (или наоборот, как удобнее)
+    # Здесь: Сначала те, где НЕТ [SIMULATION], затем дата
+    sorted_absences = sorted(data["absences"],
+                             key=lambda x: (x.get('comment', '').find('[SIMULATION]') != -1, x['from']))
+
+    print(f"{'№':<3} | {'Таб.№':<7} | {'Тип':<10} | {'Период':<23} | {'Комментарий'}")
+    print("-" * 90)
+
+    for i, item in enumerate(sorted_absences, 1):
+        t = get_type_name(item["type"])
+        period = f"{item['from']} - {item['to']}"
+        comment = item.get('comment', '')
+        print(f"{i:<3} | {item['driver_id']:<7} | {t:<10} | {period:<23} | {comment}")
+
+
 def add_absence():
-    print("\n--- ДОБАВЛЕНИЕ ОТСУТСТВИЯ ---")
+    print("\n--- ДОБАВЛЕНИЕ (РУЧНОЕ) ---")
     driver_id = input("Табельный номер водителя: ").strip()
 
-    print("Тип: 1 - Больничный, 2 - Отпуск")
-    t = input("Выбор (1/2): ").strip()
-    if t not in ["1", "2"]:
+    print("Тип: 1 - Больничный, 2 - Отпуск, 3 - Прочее")
+    t = input("Выбор: ").strip()
+
+    if t == "1":
+        absence_type = "sick"
+    elif t == "2":
+        absence_type = "vacation"
+    elif t == "3":
+        absence_type = "other"
+    else:
         print("Ошибка выбора.")
         return
-    absence_type = "sick" if t == "1" else "vacation"
 
     date_from_str = input("Дата начала (ГГГГ-ММ-ДД): ").strip()
     date_to_str = input("Дата окончания (ГГГГ-ММ-ДД): ").strip()
-    comment = input("Комментарий (необязательно): ").strip()
+    comment = input("Комментарий: ").strip()
 
     dt_from = validate_date(date_from_str)
     dt_to = validate_date(date_to_str)
 
-    if not dt_from or not dt_to:
-        print("❌ Ошибка: Неверный формат даты.")
-        return
-
-    if dt_to < dt_from:
-        print("❌ Ошибка: Дата окончания раньше начала.")
+    if not dt_from or not dt_to or dt_to < dt_from:
+        print("❌ Ошибка в датах.")
         return
 
     data = load_absences()
-
-    # --- ЛОГИКА ПРОВЕРКИ ПЕРЕСЕЧЕНИЙ ---
-    conflict_found = False
-
-    # Проходимся по существующим записям этого водителя
-    for idx, item in enumerate(data["absences"]):
-        if item["driver_id"] != driver_id:
-            continue
-
-        existing_start = validate_date(item["from"])
-        existing_end = validate_date(item["to"])
-
-        # Проверяем пересечение
-        if check_overlap(dt_from, dt_to, existing_start, existing_end):
-
-            # СЦЕНАРИЙ 1: Больничный накладывается на Больничный
-            if absence_type == "sick" and item["type"] == "sick":
-                print(f"\n⚠️  ВНИМАНИЕ: У водителя {driver_id} уже есть больничный:")
-                print(f"   С {item['from']} по {item['to']}")
-
-                # Если новый больничный полностью внутри старого - ничего делать не надо
-                if dt_from >= existing_start and dt_to <= existing_end:
-                    print("   Новый период полностью входит в существующий. Добавление не требуется.")
+    # Проверка на дубликаты
+    for item in data["absences"]:
+        if item["driver_id"] == driver_id:
+            exist_start = validate_date(item["from"])
+            exist_end = validate_date(item["to"])
+            if check_overlap(dt_from, dt_to, exist_start, exist_end):
+                print(f"⚠️ Пересечение: {item['type']} ({item['from']} - {item['to']})")
+                if input("Добавить всё равно? (да/нет): ").lower() != "да":
                     return
 
-                # Предлагаем продлить
-                user_choice = input(
-                    "   Хотите ПРОДЛИТЬ существующий больничный до новой даты? (да/нет): ").lower().strip()
-                if user_choice == "да":
-                    # Вычисляем новый конец (максимум из старого и нового)
-                    new_end_dt = max(existing_end, dt_to)
-                    data["absences"][idx]["to"] = new_end_dt.strftime("%Y-%m-%d")
-
-                    # Обновляем коммент
-                    if comment:
-                        data["absences"][idx]["comment"] = (
-                                    data["absences"][idx].get("comment", "") + " " + comment).strip()
-
-                    save_absences(data)
-                    logger.info(f"Больничный водителя {driver_id} обновлен до {data['absences'][idx]['to']}")
-                    print(f"✅ Больничный обновлен. Новый срок: до {data['absences'][idx]['to']}")
-                    return
-                else:
-                    print("   Создаю отдельную запись (наложение дат!).")
-
-            # СЦЕНАРИЙ 2: Наложение на Отпуск (или наоборот)
-            elif absence_type != item["type"]:
-                r_type = "Отпуск" if item["type"] == "vacation" else "Больничный"
-                print(f"\n⚠️  ПРЕДУПРЕЖДЕНИЕ: Пересечение с записью '{r_type}' ({item['from']} - {item['to']}).")
-                confirm = input("   Всё равно добавить запись? (да/нет): ").lower().strip()
-                if confirm != "да":
-                    print("   Отмена добавления.")
-                    return
-
-    # Если мы здесь, значит либо конфликтов нет, либо пользователь настоял на создании новой записи
     data["absences"].append({
         "driver_id": driver_id,
         "type": absence_type,
@@ -157,103 +133,221 @@ def add_absence():
         "comment": comment
     })
     save_absences(data)
-    logger.info(f"Добавлено отсутствие: водитель {driver_id}, тип {absence_type}, период {date_from_str} - {date_to_str}")
     print("✅ Запись добавлена.")
 
 
 def extend_sick_leave():
-    """
-    Продлевает последний активный больничный для указанного водителя.
-    """
     print("\n--- ПРОДЛЕНИЕ БОЛЬНИЧНОГО ---")
     driver_id = input("Табельный номер водителя: ").strip()
-
     data = load_absences()
 
-    # Ищем все больничные этого водителя
-    driver_sick_leaves = []
-    for idx, item in enumerate(data["absences"]):
-        if item["driver_id"] == driver_id and item["type"] == "sick":
-            driver_sick_leaves.append((idx, item))
+    user_leaves = [
+        (i, x) for i, x in enumerate(data["absences"])
+        if x["driver_id"] == driver_id and x["type"] == "sick"
+    ]
 
-    if not driver_sick_leaves:
-        print(f"❌ У водителя {driver_id} нет записей о больничных.")
+    if not user_leaves:
+        print("Активных больничных не найдено.")
         return
 
-    # Находим самый поздний больничный (по дате окончания)
-    # Сортируем по дате 'to'
-    driver_sick_leaves.sort(key=lambda x: datetime.strptime(x[1]["to"], "%Y-%m-%d"))
+    user_leaves.sort(key=lambda x: x[1]['to'])
+    idx, item = user_leaves[-1]
 
-    last_idx, last_sick = driver_sick_leaves[-1]
+    print(f"Текущий больничный: до {item['to']}")
+    new_date = input("Продлить ДО (ГГГГ-ММ-ДД): ").strip()
+    new_dt = validate_date(new_date)
+    current_end = validate_date(item['to'])
 
-    print(f"Найден последний больничный: с {last_sick['from']} по {last_sick['to']}")
-
-    new_date_str = input("Продлить ДО (ГГГГ-ММ-ДД): ").strip()
-    new_dt = validate_date(new_date_str)
-
-    if not new_dt:
-        print("❌ Неверный формат даты.")
+    if not new_dt or new_dt <= current_end:
+        print("❌ Новая дата должна быть больше текущей.")
         return
 
-    current_end_dt = datetime.strptime(last_sick["to"], "%Y-%m-%d")
-
-    if new_dt <= current_end_dt:
-        print("❌ Ошибка: Новая дата должна быть позже текущей даты окончания.")
-        return
-
-    # Обновляем запись
-    data["absences"][last_idx]["to"] = new_date_str
-
-    # Можно дописать комментарий о продлении
-    old_comment = data["absences"][last_idx].get("comment", "")
-    data["absences"][last_idx]["comment"] = f"{old_comment} (Продлен до {new_date_str})".strip()
-
+    data["absences"][idx]["to"] = new_date
+    data["absences"][idx]["comment"] = (item.get("comment", "") + " (Продлен)").strip()
     save_absences(data)
-    logger.info(f"Больничный водителя {driver_id} продлен до {new_date_str}")
-    print(f"✅ Больничный водителя {driver_id} продлен до {new_date_str}.")
-    print("ℹ️  Не забудьте запустить run_simulation для перераспределения смен!")
+    print("✅ Больничный продлен.")
 
 
 def remove_absence():
+    show_all()
     data = load_absences()
-    # Лучше показывать с индексами массива, чтобы удалять точно
-    print("\nВыберите номер записи для удаления:")
-    if not data["absences"]:
-        print("Список пуст.")
-        return
+    if not data["absences"]: return
 
-    for i, item in enumerate(data["absences"], 1):
-        print(f"{i}. [{item['driver_id']}] {item['type']} {item['from']} -> {item['to']}")
+    # Сортировка должна совпадать с show_all!
+    sorted_absences = sorted(data["absences"],
+                             key=lambda x: (x.get('comment', '').find('[SIMULATION]') != -1, x['from']))
 
     try:
-        choice = input("Номер: ").strip()
-        idx = int(choice) - 1
-        if 0 <= idx < len(data["absences"]):
-            removed = data["absences"].pop(idx)
+        num = int(input("\nВведите номер для удаления: ")) - 1
+        if 0 <= num < len(sorted_absences):
+            to_remove = sorted_absences[num]
+            data["absences"].remove(to_remove)
             save_absences(data)
-            logger.info(f"Удалена запись об отсутствии: {removed['driver_id']} ({removed['from']}-{removed['to']})")
-            print(f"✅ Удалено: {removed['driver_id']} ({removed['from']}-{removed['to']})")
+            print("✅ Удалено.")
         else:
             print("Неверный номер.")
     except ValueError:
-        print("Введите число.")
+        print("Нужно ввести число.")
+
+
+def clear_simulation_only():
+    data = load_absences()
+    original_count = len(data["absences"])
+    data["absences"] = [x for x in data["absences"] if "[SIMULATION]" not in x.get("comment", "")]
+
+    removed = original_count - len(data["absences"])
+    if removed > 0:
+        save_absences(data)
+        print(f"✅ Удалено {removed} записей моделирования.")
+    else:
+        print("Записей моделирования не найдено.")
 
 
 def clear_all():
-    confirm = input("Удалить ВСЕ записи? (да/нет): ").strip().lower()
-    if confirm == "да":
+    if input("Удалить АБСОЛЮТНО ВСЕ записи? (да/нет): ").lower() == "да":
         save_absences({"absences": []})
-        print("✅ Все записи удалены.")
+        print("🗑️ База очищена.")
 
+
+def generate_random_absences():
+    print("\n--- ГЕНЕРАТОР ОТСУТСТВИЙ (МОДЕЛИРОВАНИЕ) ---")
+
+    # === ОТКЛЮЧЕНИЕ ЛОГОВ В КОНСОЛЬ ===
+    # Мы ищем логгеры, которые могут шуметь, и ставим им уровень WARNING
+    # Это скроет INFO сообщения о загрузке, но покажет ошибки, если будут
+    logging.getLogger("src.database").setLevel(logging.WARNING)
+    logging.getLogger("database").setLevel(logging.WARNING)
+
+    print("⏳ Загружаю список водителей...")
+
+    # Передаем абсолютный путь к папке data, чтобы database.py точно нашел файлы
+    loader = DataLoader(data_folder=os.path.join(project_root, "data"))
+    loader.load_all()
+
+    all_drivers = loader.drivers
+
+    # Фильтрация по месяцу из конфига
+    current_month = config.SELECTED_MONTH
+    month_drivers = [d for d in all_drivers if d.month == current_month]
+
+    if not month_drivers:
+        print(f"❌ В базе нет водителей за месяц {current_month} (или проверьте config.py).")
+        return
+
+    # Фильтрация по маршруту
+    candidates = []
+    if getattr(config, "PROCESS_ALL_ROUTES", True):
+        print(f"🌍 Режим: Все маршруты ({len(month_drivers)} водителей доступно)")
+        candidates = month_drivers
+    else:
+        target_route = str(getattr(config, "SELECTED_ROUTE", "1"))
+        print(f"🎯 Режим: Только маршрут {target_route}")
+        candidates = [d for d in month_drivers if str(d.assigned_route_number) == target_route]
+        print(f"   Найдено {len(candidates)} водителей на маршруте.")
+
+    if not candidates:
+        print("❌ Нет водителей для выбора.")
+        return
+
+    # Ввод данных
+    start_date_str = input("\nДата начала (ГГГГ-ММ-ДД): ").strip()
+    dt_start = validate_date(start_date_str)
+    if not dt_start:
+        print("❌ Неверная дата.")
+        return
+
+    try:
+        duration = int(input("Длительность (дней): ").strip())
+        dt_end = dt_start + timedelta(days=duration - 1)
+        end_date_str = dt_end.strftime("%Y-%m-%d")
+    except ValueError:
+        print("❌ Длительность должна быть числом.")
+        return
+
+    print(f"📅 Период: {start_date_str} - {end_date_str}")
+
+    try:
+        count_sick = int(input("Кол-во больничных: "))
+        count_vac = int(input("Кол-во отпусков: "))
+        count_other = int(input("Кол-во прочих: "))
+    except ValueError:
+        print("❌ Вводите только числа.")
+        return
+
+    total_needed = count_sick + count_vac + count_other
+    if total_needed == 0:
+        print("Выбрано 0 человек.")
+        return
+
+    # Проверка занятости
+    data = load_absences()
+    existing_absences = data["absences"]
+    available_drivers = []
+
+    print("🔍 Проверка занятости...")
+    for driver in candidates:
+        is_busy = False
+        for rec in existing_absences:
+            if str(rec["driver_id"]) == str(driver.id):
+                rec_start = validate_date(rec["from"])
+                rec_end = validate_date(rec["to"])
+                if check_overlap(dt_start, dt_end, rec_start, rec_end):
+                    is_busy = True
+                    break
+        if not is_busy:
+            available_drivers.append(driver)
+
+    if len(available_drivers) < total_needed:
+        print(f"⚠️  Недостаточно свободных водителей! (Нужно {total_needed}, доступно {len(available_drivers)})")
+        if input("Заполнить теми, кто есть? (да/нет): ").lower() != "да":
+            return
+        total_needed = len(available_drivers)
+
+    # Генерация
+    random.shuffle(available_drivers)
+
+    selected_sick = available_drivers[:count_sick]
+    rem = available_drivers[count_sick:]
+
+    selected_vac = rem[:count_vac]
+    rem = rem[count_vac:]
+
+    selected_other = rem[:count_other]
+
+    # Сохранение
+    def make_entry(d, t):
+        return {
+            "driver_id": str(d.id),
+            "type": t,
+            "from": start_date_str,
+            "to": end_date_str,
+            "comment": "[SIMULATION] Автогенерация"
+        }
+
+    new_entries = []
+    new_entries.extend([make_entry(d, "sick") for d in selected_sick])
+    new_entries.extend([make_entry(d, "vacation") for d in selected_vac])
+    new_entries.extend([make_entry(d, "other") for d in selected_other])
+
+    data["absences"].extend(new_entries)
+    save_absences(data)
+
+    print(f"\n✅ Добавлено {len(new_entries)} записей.")
+    print("ℹ️  Используйте пункт 6 меню, чтобы удалить их.")
+
+
+# --- МЕНЮ ---
 
 def main():
     while True:
-        print("\n=== УПРАВЛЕНИЕ ОТСУТСТВИЯМИ ===")
+        print("\nУПРАВЛЕНИЕ ОТСУТСТВИЯМИ")
         print("1. Показать все")
-        print("2. Добавить больничный/отпуск")
-        print("3. Продлить больничный")  # Новая команда
-        print("4. Удалить запись")
-        print("5. Очистить все")
+        print("2. Добавить реальные данные отсутствия")
+        print("3. Продлить больничный")
+        print("4. Удалить одну запись")
+        print("5. Добавить данные для моделирования")
+        print("6. Удалить данные для моделирования")
+        print("7. Удалить все записи")
         print("0. Выход")
 
         choice = input("Выбор: ").strip()
@@ -267,6 +361,10 @@ def main():
         elif choice == "4":
             remove_absence()
         elif choice == "5":
+            generate_random_absences()
+        elif choice == "6":
+            clear_simulation_only()
+        elif choice == "7":
             clear_all()
         elif choice == "0":
             break

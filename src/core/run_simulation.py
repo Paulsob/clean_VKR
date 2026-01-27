@@ -56,18 +56,95 @@ def get_dynamic_paths(route_number, month_name, year):
     return sim_result_path, new_history_path
 
 
-def run_for_single_route(route, db, month_name, year, mode):
-    """
-    Логика расчета для ОДНОГО маршрута.
-    """
-    logger.info(f"--- Начало расчета маршрута: {route} ---")
+# СТАРАЯ ВЕРСИЯ - ЗАКОММЕНТИРОВАНА
+# def run_for_single_route(route, db, month_name, year, mode):
+#     """
+#     Логика расчета для ОДНОГО маршрута.
+#     """
+#     logger.info(f"--- Начало расчета маршрута: {route} ---")
+#
+#     # Инициализируем анализатор заново для каждого маршрута,
+#     # чтобы история и кэши не пересекались
+#     analyzer = WorkforceAnalyzer(db)
+#
+#     # --------------------------------------------------------
+#     # 1. Загрузка истории ПРОШЛОГО месяца
+#     # --------------------------------------------------------
+#     months_names = [
+#         "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+#         "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
+#     ]
+#
+#     try:
+#         curr_m_num = get_month_number(month_name)
+#         if curr_m_num == 1:
+#             prev_month_num = 12
+#             prev_year = year - 1
+#         else:
+#             prev_month_num = curr_m_num - 1
+#             prev_year = year
+#
+#         prev_month_name = months_names[prev_month_num - 1]
+#
+#         # Путь к истории прошлого месяца
+#         prev_folder = f"{prev_month_num:02d}_{prev_month_name}_{prev_year}"
+#         prev_file = f"history_{route}_{prev_month_name}_{prev_year}.json"
+#         prev_hist_path = os.path.join(HISTORY_DIR, prev_folder, prev_file)
+#
+#         if os.path.exists(prev_hist_path):
+#             with open(prev_hist_path, "r", encoding="utf-8") as f:
+#                 hist_data = json.load(f)
+#                 analyzer.load_history(hist_data)
+#                 logger.info(f"[{route}] Загружена история за {prev_month_name}: {len(hist_data)} записей")
+#         else:
+#             logger.warning(f"[{route}] История за {prev_month_name} не найдена ({prev_file}). Старт с нуля.")
+#
+#     except Exception as e:
+#         logger.error(f"[{route}] Ошибка загрузки истории: {e}")
+#
+#     # --------------------------------------------------------
+#     # 2. Расчет по дням
+#     # --------------------------------------------------------
+#     m_num = get_month_number(month_name)
+#     _, days_in_month = calendar.monthrange(year, m_num)
+#     full_results = {}
+#
+#     for day in range(1, days_in_month + 1):
+#         res = analyzer.generate_daily_roster(
+#             route, day, month_name, year, mode=mode
+#         )
+#         full_results[str(day)] = res
+#
+#     # --------------------------------------------------------
+#     # 3. Сохранение результатов
+#     # --------------------------------------------------------
+#     sim_path, hist_path = get_dynamic_paths(route, month_name, year)
+#
+#     # Сохраняем расписание
+#     os.makedirs(os.path.dirname(sim_path), exist_ok=True)
+#     with open(sim_path, "w", encoding="utf-8") as f:
+#         json.dump(full_results, f, ensure_ascii=False, indent=2, default=str)
+#
+#     # Сохраняем новую историю
+#     os.makedirs(os.path.dirname(hist_path), exist_ok=True)
+#     with open(hist_path, "w", encoding="utf-8") as f:
+#         json.dump(analyzer.get_history_serializable(), f, ensure_ascii=False, indent=2)
+#
+#     logger.info(f"[{route}] Готово. Файлы сохранены.")
 
-    # Инициализируем анализатор заново для каждого маршрута,
-    # чтобы история и кэши не пересекались
+
+def run_for_all_routes(routes_list, db, month_name, year, mode):
+    """
+    Новая логика расчета для ВСЕХ маршрутов одновременно.
+    Решает проблему межмаршрутных конфликтов водителей ANY.
+    """
+    logger.info(f"--- Начало расчета всех маршрутов: {routes_list} ---")
+
+    # Инициализируем ОДИН анализатор для всех маршрутов
     analyzer = WorkforceAnalyzer(db)
 
     # --------------------------------------------------------
-    # 1. Загрузка истории ПРОШЛОГО месяца
+    # 1. Загрузка истории ПРОШЛОГО месяца для всех маршрутов
     # --------------------------------------------------------
     months_names = [
         "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -85,51 +162,50 @@ def run_for_single_route(route, db, month_name, year, mode):
 
         prev_month_name = months_names[prev_month_num - 1]
 
-        # Путь к истории прошлого месяца
-        prev_folder = f"{prev_month_num:02d}_{prev_month_name}_{prev_year}"
-        prev_file = f"history_{route}_{prev_month_name}_{prev_year}.json"
-        prev_hist_path = os.path.join(HISTORY_DIR, prev_folder, prev_file)
-
-        if os.path.exists(prev_hist_path):
-            with open(prev_hist_path, "r", encoding="utf-8") as f:
-                hist_data = json.load(f)
-                analyzer.load_history(hist_data)
-                logger.info(f"[{route}] Загружена история за {prev_month_name}: {len(hist_data)} записей")
-        else:
-            logger.warning(f"[{route}] История за {prev_month_name} не найдена ({prev_file}). Старт с нуля.")
+        # Загружаем историю всех маршрутов
+        loaded_records = analyzer.load_history_for_all_routes(routes_list, prev_month_name, prev_year)
+        logger.info(f"Загружена объединенная история за {prev_month_name}: {loaded_records} записей")
 
     except Exception as e:
-        logger.error(f"[{route}] Ошибка загрузки истории: {e}")
+        logger.error(f"Ошибка загрузки истории: {e}")
 
     # --------------------------------------------------------
-    # 2. Расчет по дням
+    # 2. Расчет по дням для всех маршрутов одновременно
     # --------------------------------------------------------
     m_num = get_month_number(month_name)
     _, days_in_month = calendar.monthrange(year, m_num)
-    full_results = {}
+
+    # Структура: {route: {day: result}}
+    results_by_route = {route: {} for route in routes_list}
 
     for day in range(1, days_in_month + 1):
-        res = analyzer.generate_daily_roster(
-            route, day, month_name, year, mode=mode
+        # Генерируем расписание для всех маршрутов одновременно
+        daily_results = analyzer.generate_daily_roster_for_all_routes(
+            routes_list, day, month_name, year, mode=mode
         )
-        full_results[str(day)] = res
+
+        # Распределяем результаты по маршрутам
+        for route, result in daily_results.items():
+            results_by_route[route][str(day)] = result
 
     # --------------------------------------------------------
-    # 3. Сохранение результатов
+    # 3. Сохранение результатов по маршрутам (как раньше)
     # --------------------------------------------------------
-    sim_path, hist_path = get_dynamic_paths(route, month_name, year)
+    for route in routes_list:
+        sim_path, hist_path = get_dynamic_paths(route, month_name, year)
 
-    # Сохраняем расписание
-    os.makedirs(os.path.dirname(sim_path), exist_ok=True)
-    with open(sim_path, "w", encoding="utf-8") as f:
-        json.dump(full_results, f, ensure_ascii=False, indent=2, default=str)
+        # Сохраняем расписание маршрута
+        os.makedirs(os.path.dirname(sim_path), exist_ok=True)
+        with open(sim_path, "w", encoding="utf-8") as f:
+            json.dump(results_by_route[route], f, ensure_ascii=False, indent=2, default=str)
 
-    # Сохраняем новую историю
-    os.makedirs(os.path.dirname(hist_path), exist_ok=True)
-    with open(hist_path, "w", encoding="utf-8") as f:
-        json.dump(analyzer.get_history_serializable(), f, ensure_ascii=False, indent=2)
+        # Сохраняем историю маршрута (фильтруем по водителям этого маршрута)
+        route_history = analyzer.get_history_serializable()
+        os.makedirs(os.path.dirname(hist_path), exist_ok=True)
+        with open(hist_path, "w", encoding="utf-8") as f:
+            json.dump(route_history, f, ensure_ascii=False, indent=2)
 
-    logger.info(f"[{route}] Готово. Файлы сохранены.")
+    logger.info(f"Готово. Обработано {len(routes_list)} маршрутов.")
 
 
 def main():
@@ -161,10 +237,11 @@ def main():
     total = len(routes_to_process)
     for i, route in enumerate(routes_to_process, 1):
         logger.info(f">>> Обработка маршрута {route} ({i}/{total})")
+        # Запуск нового алгоритма (все маршруты одновременно)
         try:
-            run_for_single_route(route, db, SELECTED_MONTH, SELECTED_YEAR, SIMULATION_MODE)
+            run_for_all_routes(routes_to_process, db, SELECTED_MONTH, SELECTED_YEAR, SIMULATION_MODE)
         except Exception as e:
-            logger.error(f"!!! КРИТИЧЕСКАЯ ОШИБКА НА МАРШРУТЕ {route}: {e}", exc_info=True)
+            logger.error(f"!!! КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
 
     logger.info("=== Все маршруты обработаны")
 

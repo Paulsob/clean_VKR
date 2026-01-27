@@ -115,14 +115,14 @@ class DataLoader:
                 # ВАЖНО: Присваиваем номер маршрута как СТРОКУ
                 d.assigned_route_number = str(assign.route_number)
 
-
     def _load_absences(self):
         """Загружает больничные и отпуска"""
-        absences_path = "data/absences.json"
+        absences_path = os.path.join(self.data_folder, "absences.json")
+
         self.absences = []
 
         if not os.path.exists(absences_path):
-            logger.warning("Файл absences.json не найден (пропускаем)")
+            logger.warning(f"Файл absences.json не найден: {absences_path} (пропускаем)")
             return
 
         try:
