@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Планировщик смен водителей</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
+    <div class="container">
+        <a class="navbar-brand" href="#">Трамвайный парк №5</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link active" href="#" id="nav-calendar">Календарь</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#" id="download-report">Сводный отчет</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#" data-bs-toggle="modal" data-bs-target="#absenceModal">Отсутствующие</a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<div class="container">
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <h2>Календарь расписаний</h2>
+            <div id="calendar-container" class="bg-light p-3 rounded">
+                <div class="text-center p-5 text-muted">Загрузка календаря...</div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card mb-4">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Статистика водителей</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Режим отображения:</label>
+                        <select id="modeSwitch" class="form-select">
+                            <option value="real" selected>Реальные данные</option>
+                            <option value="statistical">По статистике (21.7%)</option>
+                        </select>
+                    </div>
+
+                    <div id="absenceStats">
+                        <p class="text-muted text-center">Данные загружаются...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header bg-warning">
+                    <h5 class="mb-0">Последние отсутствия</h5>
+                </div>
+                <div class="card-body">
+                    <ul id="recentAbsences" class="list-group">
+                        <li class="list-group-item text-muted">Нет данных</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <div class="d-flex flex-column flex-md-row align-items-md-end gap-3">
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h5>Управление расчетом</h5>
+                    <button id="runSimulationBtn" class="btn btn-success">Запустить расчет расписания</button>
+                    <div id="simStatus" class="small text-muted mt-2"></div>
+                </div>
+            </div>
+            <div>
+                <label for="routeSelect" class="form-label mb-1">Маршрут для просмотра</label>
+                <select id="routeSelect" class="form-select form-select-sm" style="max-width: 220px;">
+                    <option value="" disabled selected>Загрузка...</option>
+                </select>
+            </div>
+            <div class="form-check form-switch mt-2 mt-md-0">
+                <input class="form-check-input" type="checkbox" role="switch" id="weekendSwitch">
+                <label class="form-check-label" for="weekendSwitch">
+                    Можно вызывать с выходного дня
+                </label>
+            </div>
+            <div class="text-muted small" id="routeHint">
+                Выберите маршрут, затем кликните день в календаре
+            </div>
+        </div>
+        <div id="scheduleDisplay" class="mt-3"></div>
+    </div>
+</div>
+
+<div class="modal fade" id="absenceModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Ввод данных об отсутствующих</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="absenceForm">
+                    <div class="mb-3">
+                        <label class="form-label">Табельный номер</label>
+                        <input type="text" class="form-control" name="tab_no" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Тип смены</label>
+                        <select class="form-select" name="shift" required>
+                            <option value="1">1 смена</option>
+                            <option value="2">2 смена</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Дата отсутствия (день месяца)</label>
+                        <!-- Тут лучше заменить на input type="date" в будущем, но пока оставим как было -->
+                        <input type="number" class="form-control" name="day" min="1" max="31" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Причина отсутствия</label>
+                        <select class="form-select" name="reason" required>
+                            <option value="0">Отпуск</option>
+                            <option value="1">Больничный</option>
+                            <option value="2">Не предупредил</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Добавить</button>
+                </form>
+                <div id="formResponse" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script src="/static/js/calendar.js"></script>
+<script src="/static/js/absense.js"></script>
+
+<script>
+    // Основная инициализация страницы
+    $(document).ready(function() {
+        console.log("App started");
+
+        // Тут мы вызовем функции из подключенных файлов
+        if(typeof initCalendar === 'function') {
+            initCalendar();
+        }
+
+        // Обработчики кнопок, которые были в dashboard.html
+        $('#modeSwitch').change(function() {
+            // updateAbsenceStats($(this).val()); // Эту функцию нужно будет найти или перенести
+        });
+
+        $('#download-report').click(function(e) {
+            e.preventDefault();
+            // window.location.href = 'http://localhost:5000/get-report'; // Пример ссылки на API
+            alert("Функция скачивания отчета пока не подключена к API");
+        });
+
+        // Загрузка последних отсутствий (если функция есть)
+        // loadRecentAbsences();
+    });
+</script>
+</body>
+</html>

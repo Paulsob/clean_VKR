@@ -11,7 +11,9 @@ logger = get_logger(__name__)
 
 class DataLoader:
     def __init__(self, data_folder: str = "data"):
-        self.data_folder = data_folder
+        current_file_path = os.path.abspath(__file__)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file_path)))
+        self.data_folder = os.path.join(project_root, data_folder)
         self.drivers: List[Driver] = []
         self.schedules: List[RouteSchedule] = []
         self.assignments: List[Assignment] = []

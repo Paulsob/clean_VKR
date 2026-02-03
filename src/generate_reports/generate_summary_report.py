@@ -16,7 +16,7 @@ os.chdir(project_root)
 
 from src.config import (
     SELECTED_MONTH, SELECTED_YEAR, SELECTED_ROUTE, PROCESS_ALL_ROUTES,
-    SIMULATION_MODE  # <--- ДОБАВЛЕНО
+    SIMULATION_MODE
 )
 from src.prepare_data.database import DataLoader
 from src.logger import get_logger
@@ -88,16 +88,23 @@ def get_day_of_week_row(year, month, all_days):
 
 
 def style_worksheet(ws, all_days_len):
-    """Стилизация + Автоширина + Запрет переноса"""
-    fill_work = PatternFill("solid", fgColor="C6EFCE")
-    fill_work_warn = PatternFill("solid", fgColor="FFEB9C")
-    fill_reserve = PatternFill("solid", fgColor="FFC7CE")
-    fill_rest = PatternFill("solid", fgColor="F2F2F2")
-    fill_sick = PatternFill("solid", fgColor="FFFF00")
-    fill_header = PatternFill("solid", fgColor="4472C4")
-    fill_stat = PatternFill("solid", fgColor="D9E1F2")
-    fill_guest_header = PatternFill("solid", fgColor="70AD47")
-    fill_any_header = PatternFill("solid", fgColor="FFD966")  # Желтоватый для ANY
+    """Стилизация + Автоширина + Заморозка + Подсветка"""
+
+    # (b) Закрепить первые 2 строки
+    ws.freeze_panes = 'A3'
+
+    fill_work = PatternFill("solid", fgColor="C6EFCE")  # Зеленый (Норма)
+    fill_work_warn = PatternFill("solid", fgColor="FFEB9C")  # Желтый (Предупреждение)
+    fill_work_weekend = PatternFill("solid", fgColor="FFC000")  # (g) Ярко-оранжевый (Выход в выходной)
+
+    fill_reserve = PatternFill("solid", fgColor="FFC7CE")  # Красный (Резерв)
+    fill_rest = PatternFill("solid", fgColor="F2F2F2")  # Серый (Выходной)
+    fill_sick = PatternFill("solid", fgColor="FFFF00")  # Желтый (Больничный/Отпуск/Прочее)
+
+    fill_header = PatternFill("solid", fgColor="4472C4")  # Синий заголовок
+    fill_stat = PatternFill("solid", fgColor="D9E1F2")  # Голубой (Статистика)
+    fill_guest_header = PatternFill("solid", fgColor="70AD47")  # Зеленый (Гости)
+    fill_any_header = PatternFill("solid", fgColor="FFD966")  # Золотой (ANY)
 
     font_header = Font(bold=True, color="FFFFFF")
     font_bold = Font(bold=True)
@@ -107,15 +114,17 @@ def style_worksheet(ws, all_days_len):
     for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
         first_val = str(row[0].value) if row[0].value else ""
 
-        is_header_group = first_val in ["РАБОЧЕЕ ЯДРО", "ИЗБЫТОЧНЫЙ РЕЗЕРВ"]
+        is_header_group = first_val in ["РАБОЧЕЕ ЯДРО"]
         is_guest_header = "ПРИВЛЕЧЕННЫЕ" in first_val or "РЕЗЕРВ (НЕ ЗАКРЕПЛЕННЫЕ)" in first_val
         is_any_header = "РЕЗЕРВ ANY" in first_val
-        # Определяем блок статистики по ключевым словам из обоих режимов
+
+        # (e) "Количество водителей, которым не хватило наряда" должно попадать сюда
         is_stat_block = any(k in first_val for k in [
-            "Количество закрытых смен", "Количество незакрытых смен",
-            "Количество смен по расписанию", "Всего водителей",
-            "Количество водителей, вышедших", "Количество водителей, находящихся"
+            "Количество закрытых", "Количество незакрытых",
+            "Количество смен", "Всего водителей",
+            "Количество водителей"  # Ловит все строки начинающиеся так
         ])
+
         is_dow_row = str(row[-1].value) in ["Пн", "Вт", "Сб", "Вс"] or "День недели" in str(row[5].value)
 
         if is_header_group:
@@ -153,14 +162,27 @@ def style_worksheet(ws, all_days_len):
                 if val in ["Сб", "Вс"]: cell.fill = PatternFill("solid", fgColor="E2EFDA")
                 continue
 
-            if "БОЛЬНИЧНЫЙ" in val or "ОТПУСК" in val:
+            # Обработка значений ячеек
+
+            # (g) Выход в выходной (метка [ВЫХ] ставится в process_route)
+            if "[ВЫХ]" in val:
+                cell.fill = fill_work_weekend
+                # Убираем метку из видимого текста, чтобы было красиво
+                cell.value = val.replace(" [ВЫХ]", "")
+
+            elif "БОЛЬНИЧНЫЙ" in val or "ОТПУСК" in val or "ПРОЧЕЕ" in val:
                 cell.fill = fill_sick
+
             elif "(!)" in val or "⚠️" in val:
                 cell.fill = fill_work_warn
+
             elif "ч (" in val:
                 cell.fill = fill_work
-            elif "РЕЗЕРВ" in val:
+
+            # (f) В Strict режиме "РЕЗЕРВ" заменяется на "МАЛО ОТДЫХА", но красим так же
+            elif "РЕЗЕРВ" in val or "МАЛО ОТДЫХА" in val:
                 cell.fill = fill_reserve
+
             elif val in ["В", "B", "О", "Б"]:
                 cell.fill = fill_rest
 
@@ -171,7 +193,7 @@ def style_worksheet(ws, all_days_len):
             if cell.value:
                 length = max(length, len(str(cell.value)))
         adjusted_width = (length + 2) * 1.05
-        if adjusted_width > 50: adjusted_width = 50  # Чуть шире для длинных названий статистики
+        if adjusted_width > 55: adjusted_width = 55
         if adjusted_width < 5: adjusted_width = 5
         ws.column_dimensions[get_column_letter(column_cells[0].column)].width = adjusted_width
 
@@ -190,6 +212,49 @@ def get_schedule_from_driver(driver_obj):
     return sch_type
 
 
+# Хелпер для создания строк статистики
+def create_stat_rows(stats_dict, total_drivers_count, all_days):
+    rows = []
+
+    def make_row(title, data_key):
+        r = {"Маршрут": title, "Таб.№": "", "График": "", "Смен": "", "Часов": "", "Резерв (дн)": ""}
+        for d in all_days:
+            # Берем значение из словаря, если ключа нет (например, stat_unclosed нет в daily_counters), считаем
+            if data_key in stats_dict[d]:
+                r[d] = stats_dict[d][data_key]
+            elif data_key == 'unclosed':
+                # Вычисляемое поле
+                plan = stats_dict[d].get('plan_shifts', 0)
+                closed = stats_dict[d].get('closed_shifts', 0)
+                r[d] = max(0, plan - closed)
+            else:
+                r[d] = 0
+        return r
+
+    row_1 = make_row("Количество закрытых смен", 'closed_shifts')
+    row_2 = make_row("Количество незакрытых смен", 'unclosed')
+    row_3 = make_row("Количество смен по расписанию", 'plan_shifts')
+    row_4 = make_row("Количество водителей, вышедших по расписанию на свой маршрут", 'drivers_native')
+    row_5 = make_row("Количество водителей, вышедших по расписанию и не прикрепленных к маршруту", 'drivers_guest')
+    row_6 = make_row("Количество водителей, вышедших на смену в выходной день", 'drivers_weekend_work')
+
+    rows.extend([row_1, row_2, row_3, row_4, row_5, row_6])
+
+    if SIMULATION_MODE == 'real':
+        row_7 = make_row("Количество водителей, находящихся на выходном", 'drivers_on_rest')
+        row_8 = make_row("Количество водителей, которым не хватило наряда", 'reserve_true')
+        row_9 = {"Маршрут": "Всего водителей (закрепленных)", "Таб.№": total_drivers_count, "График": "", "Смен": "",
+                 "Часов": "", "Резерв (дн)": ""}
+        rows.extend([row_7, row_8, row_9])
+    else:
+        # STRICT mode
+        row_7 = {"Маршрут": "Всего водителей (закрепленных)", "Таб.№": total_drivers_count, "График": "", "Смен": "",
+                 "Часов": "", "Резерв (дн)": ""}
+        rows.append(row_7)
+
+    return rows
+
+
 def process_route(route_number, sim_file_path, assigned_drivers, all_drivers_db, absences_map, schedule_counts,
                   month_num, all_days):
     """
@@ -199,33 +264,27 @@ def process_route(route_number, sim_file_path, assigned_drivers, all_drivers_db,
         with open(sim_file_path, "r", encoding="utf-8") as f:
             sim_data = json.load(f)
     except Exception:
-        return [], [], [], {}, {}, {}, {}  # Возвращаем пустые структуры
+        return [], [], [], [], {}, {}, {}
 
     native_drivers_map = {str(d.id): d for d in assigned_drivers}
     report_data_native = {did: {'days': {}, 'work_count': 0, 'reserve_count': 0, 'hours': 0} for did in
                           native_drivers_map}
     guest_drivers_data = {}
 
-    # === СБОР СТАТИСТИКИ (ИНИЦИАЛИЗАЦИЯ) ===
-    # Нам нужно собирать данные для каждого дня
     daily_counters = {d: {
-        'closed_shifts': 0,  # 1. Закрытые смены (всего)
-        'plan_shifts': 0,  # 3. Смены по расписанию
-        'drivers_native': 0,  # 4. Свои на маршруте
-        'drivers_guest': 0,  # 5. Чужие на маршруте
-        'drivers_weekend_work': 0,  # 6. Работа в выходной (свой или чужой)
-        'drivers_on_rest': 0,  # 7. На выходном (только свои, т.к. чужие по определению работают)
-        'reserve_true': 0  # 8. Не хватило наряда (резерв)
+        'closed_shifts': 0, 'plan_shifts': 0,
+        'drivers_native': 0, 'drivers_guest': 0,
+        'drivers_weekend_work': 0, 'drivers_on_rest': 0,
+        'reserve_true': 0
     } for d in all_days}
 
     route_plan = schedule_counts.get(str(route_number), {'workday': 0, 'weekend': 0})
 
-    # 1. ФАКТ (Симуляция) - заполняем работу
+    # 1. ФАКТ (Симуляция)
     for day_str, day_res in sim_data.items():
         if not day_str.isdigit(): continue
         day = int(day_str)
 
-        # Считаем план на этот день
         dt = date(SELECTED_YEAR, month_num, day)
         is_weekend = dt.weekday() >= 5
         daily_counters[day]['plan_shifts'] = route_plan['weekend'] if is_weekend else route_plan['workday']
@@ -234,7 +293,7 @@ def process_route(route_number, sim_file_path, assigned_drivers, all_drivers_db,
             for shift_key in ["shift_1", "shift_2"]:
                 s_info = tram.get(shift_key)
                 if s_info and s_info.get("driver"):
-                    daily_counters[day]['closed_shifts'] += 1  # +1 закрытая смена
+                    daily_counters[day]['closed_shifts'] += 1
 
                     raw_did = s_info["driver"].split(" ")[0]
                     wh = s_info.get("work_hours", 8.0)
@@ -243,18 +302,19 @@ def process_route(route_number, sim_file_path, assigned_drivers, all_drivers_db,
                     val = f"{wh:.1f}ч (отд {rest_str})"
                     if s_info.get("warnings"): val += " (!)"
 
-                    # Определяем объект водителя для проверки графика (работа в выходной)
+                    # Определяем объект водителя
                     current_driver_obj = native_drivers_map.get(raw_did)
                     if not current_driver_obj:
-                        # Если это гость, ищем в общей базе
                         current_driver_obj = next((d for d in all_drivers_db if str(d.id) == raw_did), None)
 
-                    # Проверка на работу в выходной (если по графику у него 'В')
-                    if current_driver_obj:
+                    # (g) Подсветка работы в выходной (только для REAL)
+                    if SIMULATION_MODE == 'real' and current_driver_obj:
                         status_in_plan = current_driver_obj.get_status_for_day(day)
-                        # Если в плане Выходной, Отпуск или Больничный, но он работает -> это работа в выходной
-                        if status_in_plan in ['В', 'B'] or status_in_plan.isdigit() == False:
+                        # Если статус не "Работа" (1/2), а он работает -> Выходной
+                        # Проверяем на В, О, Б или просто отсутствие явной смены
+                        if status_in_plan in ['В', 'B', 'О', 'Б'] or status_in_plan not in ['1', '2']:
                             daily_counters[day]['drivers_weekend_work'] += 1
+                            val += " [ВЫХ]"  # Метка для style_worksheet
 
                     if raw_did in report_data_native:
                         # СВОЙ
@@ -274,29 +334,38 @@ def process_route(route_number, sim_file_path, assigned_drivers, all_drivers_db,
                             guest_drivers_data[raw_did]['hours'] += wh
                         daily_counters[day]['drivers_guest'] += 1
 
-    # 2. ЗАПОЛНЕНИЕ СТАТУСОВ (Только для СВОИХ) + Подсчет Резерва и Отдыхающих
+    # 2. ЗАПОЛНЕНИЕ СТАТУСОВ
     for did, d_obj in native_drivers_map.items():
         driver_absences = absences_map.get(did, {})
         for day in all_days:
-            # Если водитель работал в этот день, мы его уже учли выше
-            if day in report_data_native[did]['days']:
-                continue
+            if day in report_data_native[did]['days']: continue
 
             check_date = date(SELECTED_YEAR, month_num, day)
             if check_date in driver_absences:
                 a_type = driver_absences[check_date]
-                report_data_native[did]['days'][day] = "БОЛЬНИЧНЫЙ" if a_type == "sick" else "ОТПУСК"
-                # В 'strict' и 'real' не просили отдельно считать больных, но они попадают в "Общее кол-во"
+                # (d) Добавлено ПРОЧЕЕ
+                if a_type == "sick":
+                    status = "БОЛЬНИЧНЫЙ"
+                elif a_type == "vacation":
+                    status = "ОТПУСК"
+                else:
+                    status = "ПРОЧЕЕ"
+
+                report_data_native[did]['days'][day] = status
                 continue
 
             plan = d_obj.get_status_for_day(day)
             if plan in ["1", "2"]:
-                report_data_native[did]['days'][day] = "РЕЗЕРВ"
+                # (f) Strict -> МАЛО ОТДЫХА
+                if SIMULATION_MODE == 'strict':
+                    report_data_native[did]['days'][day] = "МАЛО ОТДЫХА"
+                else:
+                    report_data_native[did]['days'][day] = "РЕЗЕРВ"
+
                 report_data_native[did]['reserve_count'] += 1
                 daily_counters[day]['reserve_true'] += 1
             else:
                 report_data_native[did]['days'][day] = plan
-                # Если статус В, О, Б -> это отдыхающий (для статистики REAL)
                 if plan in ["В", "B", "О", "Б"]:
                     daily_counters[day]['drivers_on_rest'] += 1
 
@@ -333,40 +402,22 @@ def process_route(route_number, sim_file_path, assigned_drivers, all_drivers_db,
     # 5. ДАННЫЕ ДЛЯ ГЛОБАЛЬНОГО СВОДА
     guest_raw_global = {}
     any_drivers_raw_global = {}
-
     for did, g_data in guest_drivers_data.items():
         d_obj = g_data['obj']
         info = {'obj': g_data['obj'], 'updates': {}}
         for day, val in g_data['days'].items():
             info['updates'][day] = f"{val} №{route_number}"
-
         if str(d_obj.assigned_route_number).upper() == "ANY":
             any_drivers_raw_global[did] = info
         else:
             guest_raw_global[did] = info
 
-    # 6. СТАТИСТИКА (ЛОКАЛЬНАЯ ДЛЯ ЛИСТА МАРШРУТА - оставим упрощенную, как было, или сделаем детальную?)
-    # Оставим упрощенную для листов маршрутов, чтобы не загромождать, а детальную вернем в daily_stats_raw
+    # 6. СТАТИСТИКА (Теперь полная и для листа маршрута!)
+    # (a) Переносим новую статистику на листы маршрутов
+    stats_block = create_stat_rows(daily_counters, len(native_drivers_map), all_days)
 
-    # Для совместимости со старым кодом локального листа, сформируем базовые строки
-    row_plan = {"Маршрут": "Количество смен по расписанию", "Таб.№": "", "График": "", "Смен": "", "Часов": "",
-                "Резерв (дн)": ""}
-    row_fact = {"Маршрут": "Количество водителей, вышедших на смену", "Таб.№": "", "График": "", "Смен": "",
-                "Часов": "", "Резерв (дн)": ""}
-    row_reserv = {"Маршрут": "Количество водителей без наряда (резерв)", "Таб.№": "", "График": "", "Смен": "",
-                  "Часов": "", "Резерв (дн)": ""}
-
-    for day in all_days:
-        row_plan[day] = daily_counters[day]['plan_shifts']
-        # В локальном отчете "Вышедшие" = Свои + Чужие
-        row_fact[day] = daily_counters[day]['drivers_native'] + daily_counters[day]['drivers_guest']
-        row_reserv[day] = daily_counters[day]['reserve_true']
-
-    stats_block = [row_plan, row_fact, row_reserv]  # Локально можно проще
-
-    # Возвращаем детальную статистику для глобального свода
     daily_stats_detailed = daily_counters
-    daily_stats_detailed['total_drivers_native'] = len(native_drivers_map)  # Кол-во закрепленных
+    daily_stats_detailed['total_drivers_native'] = len(native_drivers_map)
 
     return active_rows, reserve_rows, guest_rows, stats_block, daily_stats_detailed, guest_raw_global, any_drivers_raw_global
 
@@ -385,8 +436,15 @@ def main():
                  "Июль": 7, "Август": 8, "Сентябрь": 9, "Октябрь": 10, "Ноябрь": 11, "Декабрь": 12}
     m_num = month_map.get(SELECTED_MONTH, 1)
     month_str_num = f"{m_num:02d}"
-    results_dir = os.path.join("data", "results", f"{month_str_num}_{SELECTED_MONTH}_{SELECTED_YEAR}")
-    search_pattern = os.path.join(results_dir, f"simulation_*_{SELECTED_MONTH}_{SELECTED_YEAR}.json")
+
+    # Пути с учетом подпапок режима
+    results_dir = os.path.join(
+        "data", "results",
+        f"{month_str_num}_{SELECTED_MONTH}_{SELECTED_YEAR}",
+        SIMULATION_MODE
+    )
+    search_pattern = os.path.join(results_dir, f"simulation_{SIMULATION_MODE}_*_{SELECTED_MONTH}_{SELECTED_YEAR}.json")
+
     found_files = glob.glob(search_pattern)
 
     if not found_files:
@@ -400,12 +458,12 @@ def main():
     target_route = str(SELECTED_ROUTE) if not PROCESS_ALL_ROUTES else None
 
     if PROCESS_ALL_ROUTES:
-        filename_summary = f"summary_report_FULL_PARK_{SELECTED_MONTH}_{SELECTED_YEAR}.xlsx"
+        filename_summary = f"summary_report_{SIMULATION_MODE}_FULL_PARK_{SELECTED_MONTH}_{SELECTED_YEAR}.xlsx"
     else:
-        filename_summary = f"summary_report_{SELECTED_ROUTE}_{SELECTED_MONTH}_{SELECTED_YEAR}.xlsx"
+        filename_summary = f"summary_report_{SIMULATION_MODE}_{SELECTED_ROUTE}_{SELECTED_MONTH}_{SELECTED_YEAR}.xlsx"
 
     directory_name = f"{month_str_num}_{SELECTED_MONTH}_{SELECTED_YEAR}"
-    dynamic_summary_file = os.path.join("outputs", "SUMMARY_REPORTS", directory_name, filename_summary)
+    dynamic_summary_file = os.path.join("outputs", "SUMMARY_REPORTS", directory_name, SIMULATION_MODE, filename_summary)
 
     os.makedirs(os.path.dirname(dynamic_summary_file), exist_ok=True)
     writer = pd.ExcelWriter(dynamic_summary_file, engine='openpyxl')
@@ -416,7 +474,6 @@ def main():
     global_unassigned_guests = {}
     global_any_drivers = {}
 
-    # Сумматоры детальной статистики
     global_stats_detailed = {d: {
         'closed_shifts': 0, 'plan_shifts': 0,
         'drivers_native': 0, 'drivers_guest': 0,
@@ -428,7 +485,7 @@ def main():
     dow_row = get_day_of_week_row(SELECTED_YEAR, m_num, all_days)
 
     def get_route_num(path):
-        m = re.search(r"simulation_(\d+)_", os.path.basename(path))
+        m = re.search(f"simulation_{SIMULATION_MODE}_(\\d+)_", os.path.basename(path))
         return int(m.group(1)) if m else 9999
 
     found_files.sort(key=get_route_num)
@@ -451,17 +508,11 @@ def main():
             global_reserves_native.extend(reserve)
             global_total_drivers_count += detailed_stats['total_drivers_native']
 
-            # Суммируем дневную статистику
             for d in all_days:
                 src = detailed_stats[d]
                 dst = global_stats_detailed[d]
-                dst['closed_shifts'] += src['closed_shifts']
-                dst['plan_shifts'] += src['plan_shifts']
-                dst['drivers_native'] += src['drivers_native']
-                dst['drivers_guest'] += src['drivers_guest']
-                dst['drivers_weekend_work'] += src['drivers_weekend_work']
-                dst['drivers_on_rest'] += src['drivers_on_rest']
-                dst['reserve_true'] += src['reserve_true']
+                for k in dst.keys():
+                    dst[k] += src.get(k, 0)
 
             # Агрегация гостей
             for did, info in guest_global_updates.items():
@@ -491,21 +542,13 @@ def main():
         sheet_rows.append(h_act)
         for r in active: c = r.copy(); del c["Маршрут"]; sheet_rows.append(c)
 
+        # (c) Убрали заголовок "ИЗБЫТОЧНЫЙ РЕЗЕРВ". Просто добавляем резервных.
+        # Если нужно разделение пустой строкой, оставим sep.
         sep = {k: "" for k in h_act}
-        sheet_rows.append(sep)
-        h_res = {"Таб.№": "ИЗБЫТОЧНЫЙ РЕЗЕРВ", "График": "", "Смен": "", "Часов": "", "Резерв (дн)": ""}
-        for d in all_days: h_res[d] = ""
-        sheet_rows.append(h_res)
-        for r in reserve: c = r.copy(); del c["Маршрут"]; sheet_rows.append(c)
-        sheet_rows.append(sep)
+        if active and reserve:
+            sheet_rows.append(sep)
 
-        # Локальная статистика (упрощенная)
-        for sr in stats:
-            sr_c = sr.copy();
-            title = sr_c["Маршрут"];
-            del sr_c["Маршрут"]
-            sr_c["Таб.№"] = title
-            sheet_rows.append(sr_c)
+        for r in reserve: c = r.copy(); del c["Маршрут"]; sheet_rows.append(c)
 
         if guests:
             sheet_rows.append(sep)
@@ -514,6 +557,15 @@ def main():
             sheet_rows.append(h_guest)
             for r in guests: c = r.copy(); del c["Маршрут"]; sheet_rows.append(c)
 
+        # Статистика (a) теперь внизу (так как guests могут быть)
+        sheet_rows.append(sep)
+        for sr in stats:
+            sr_c = sr.copy();
+            title = sr_c["Маршрут"];
+            del sr_c["Маршрут"]
+            sr_c["Таб.№"] = title
+            sheet_rows.append(sr_c)
+
         df = pd.DataFrame(sheet_rows)
         cols = ["Таб.№", "График", "Смен", "Часов", "Резерв (дн)"] + all_days
         df = df[cols]
@@ -521,7 +573,7 @@ def main():
         df.to_excel(writer, index=False, sheet_name=sn)
         style_worksheet(writer.sheets[sn], len(all_days))
 
-    # --- ОБЩИЙ СВОД (С ИЗМЕНЕНИЯМИ) ---
+    # --- ОБЩИЙ СВОД ---
     if PROCESS_ALL_ROUTES and processed_count > 0:
         logger.info("Формирование общего свода...")
         common_rows = [dow_row]
@@ -532,13 +584,10 @@ def main():
         for d in all_days: h_glob[d] = ""
         common_rows.append(h_glob)
         common_rows.extend(global_natives)
-        common_rows.append(sep)
 
-        # 2. Свои Резерв
-        h_glob_res = {"Маршрут": "ИЗБЫТОЧНЫЙ РЕЗЕРВ", "Таб.№": "", "График": "", "Смен": "", "Часов": "",
-                      "Резерв (дн)": ""}
-        for d in all_days: h_glob_res[d] = ""
-        common_rows.append(h_glob_res)
+        # 2. Свои Резерв (c) Убрали заголовок "ИЗБЫТОЧНЫЙ РЕЗЕРВ"
+        if global_natives and global_reserves_native:
+            common_rows.append(sep)
         common_rows.extend(global_reserves_native)
         common_rows.append(sep)
 
@@ -578,7 +627,12 @@ def main():
                 for day in all_days:
                     if day in days_data:
                         day_val = days_data[day]
-                        filled_days_data[day] = day_val
+                        # (g) Подсветка и перенос маркера выходного дня
+                        if "[ВЫХ]" in day_val:
+                            filled_days_data[day] = day_val  # Оставляем маркер, style_worksheet его обработает
+                        else:
+                            filled_days_data[day] = day_val
+
                         if "КОНФЛИКТ" in day_val:
                             conflicts += 1
                         else:
@@ -590,15 +644,23 @@ def main():
                         driver_absences = absences_map.get(did, {})
                         if check_date in driver_absences:
                             a_type = driver_absences[check_date]
-                            filled_days_data[day] = "БОЛЬНИЧНЫЙ" if a_type == "sick" else "ОТПУСК"
+                            if a_type == "sick":
+                                filled_days_data[day] = "БОЛЬНИЧНЫЙ"
+                            elif a_type == "vacation":
+                                filled_days_data[day] = "ОТПУСК"
+                            else:
+                                filled_days_data[day] = "ПРОЧЕЕ"
                         else:
                             plan = d_obj.get_status_for_day(day)
                             if plan in ["1", "2"]:
-                                filled_days_data[day] = "РЕЗЕРВ"
+                                # (f) Strict logic
+                                if SIMULATION_MODE == 'strict':
+                                    filled_days_data[day] = "МАЛО ОТДЫХА"
+                                else:
+                                    filled_days_data[day] = "РЕЗЕРВ"
                                 reserve_days += 1
                             else:
                                 filled_days_data[day] = plan
-                                # В режиме REAL здесь можно посчитать отдыхающих ANY, но пока не будем усложнять глобальную стату
 
                 row = {
                     "Маршрут": "ANY", "Таб.№": f"{did}" + (" ⚠️" if conflicts > 0 else ""),
@@ -610,62 +672,12 @@ def main():
                 for day in all_days: row[day] = filled_days_data.get(day, "")
                 common_rows.append(row)
 
-            common_rows.append(sep)  # Отделяем статистику от ANY
+            common_rows.append(sep)
 
-        # 5. СТАТИСТИКА (В САМОМ НИЗУ)
+        # 5. СТАТИСТИКА (В САМОМ НИЗУ, НИЖЕ ANY)
         logger.info(f"Формирование блока статистики для режима: {SIMULATION_MODE}")
-
-        # Подготовка данных
-        stat_closed = {d: global_stats_detailed[d]['closed_shifts'] for d in all_days}
-        stat_plan = {d: global_stats_detailed[d]['plan_shifts'] for d in all_days}
-        # Незакрытые = План - Закрытые (но не меньше 0, если вдруг перевыполнение)
-        stat_unclosed = {d: max(0, global_stats_detailed[d]['plan_shifts'] - global_stats_detailed[d]['closed_shifts'])
-                         for d in all_days}
-
-        stat_native_work = {d: global_stats_detailed[d]['drivers_native'] for d in all_days}
-        stat_guest_work = {d: global_stats_detailed[d]['drivers_guest'] for d in all_days}
-
-        stat_weekend_work = {d: global_stats_detailed[d]['drivers_weekend_work'] for d in all_days}
-        stat_on_rest = {d: global_stats_detailed[d]['drivers_on_rest'] for d in all_days}
-        stat_reserve = {d: global_stats_detailed[d]['reserve_true'] for d in all_days}
-
-        # Создаем строки
-        def create_stat_row(title, data_dict):
-            r = {"Маршрут": title, "Таб.№": "", "График": "", "Смен": "", "Часов": "", "Резерв (дн)": ""}
-            for d in all_days: r[d] = data_dict[d]
-            return r
-
-        row_1 = create_stat_row("Количество закрытых смен", stat_closed)
-        row_2 = create_stat_row("Количество незакрытых смен", stat_unclosed)
-        row_3 = create_stat_row("Количество смен по расписанию", stat_plan)
-        row_4 = create_stat_row("Количество водителей, вышедших по расписанию на свой маршрут", stat_native_work)
-        row_5 = create_stat_row("Количество водителей, вышедших по расписанию и не прикрепленных к маршруту",
-                                stat_guest_work)
-        row_6 = create_stat_row("Количество водителей, вышедших на смену в выходной день", stat_weekend_work)
-
-        # Специфичные строки
-        row_7_real = create_stat_row("Количество водителей, находящихся на выходном", stat_on_rest)
-        row_8_real = create_stat_row("Количество водителей, которым не хватило наряда", stat_reserve)
-
-        # Общее количество (константа для всех дней, либо динамически, если кол-во меняется)
-        # Здесь берем общее число закрепленных
-        row_total = {"Маршрут": "Всего водителей (закрепленных)", "Таб.№": global_total_drivers_count, "График": "",
-                     "Смен": "", "Часов": "", "Резерв (дн)": ""}
-        # Можно дублировать в ячейки дней, если нужно
-        # for d in all_days: row_total[d] = global_total_drivers_count
-
-        if SIMULATION_MODE == 'real':
-            # REAL: 1-6, 7(rest), 8(reserve), 9(total)
-            common_rows.extend([row_1, row_2, row_3, row_4, row_5, row_6, row_7_real, row_8_real, row_total])
-        else:
-            # STRICT: 1-6, 7(total). *Заметка: в промпте было 7 пунктов, но пропущен "резерв".
-            # "Количество водителей, находящихся на выходном" (7) в Strict тоже просили.
-            # "Общее количество" (8).
-            # Исходя из текста "в режиме strict нужно... 6... 7. Общее количество", пропущены отдыхающие и резерв
-            # Но по логике Strict ("строго с дырами"), переработки (п.6) быть не должно, но поле мы оставим (оно будет 0).
-            # Сделаю ровно как в запросе:
-            # 1. закрытые, 2. незакрытые, 3. по расписанию, 4. свои, 5. чужие, 6. выходной (зачем в стрикте?), 7. Общее
-            common_rows.extend([row_1, row_2, row_3, row_4, row_5, row_6, row_total])
+        global_stats_rows = create_stat_rows(global_stats_detailed, global_total_drivers_count, all_days)
+        common_rows.extend(global_stats_rows)
 
         df_glob = pd.DataFrame(common_rows)
         cols_glob = ["Маршрут", "Таб.№", "График", "Смен", "Часов", "Резерв (дн)"] + all_days

@@ -2,10 +2,18 @@ import sys
 import os
 import json
 import random
-import logging  # Добавили для управления уровнями логов
+import logging
 from datetime import datetime, timedelta
 
-# --- НАСТРОЙКА ПУТЕЙ ---
+"""
+9252 - 9
+9320 - 47
+10054 - 47
+10353 - 47
+10365 - 47
+"""
+
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 if project_root not in sys.path:
@@ -19,12 +27,9 @@ except ImportError as e:
     print(f"Ошибка импорта: {e}")
     sys.exit(1)
 
-# Логгер только для этого файла (пишет в файл)
 logger = get_file_only_logger("absences_manager")
 ABSENCES_FILE = os.path.join(project_root, "data", "absences.json")
 
-
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 
 def load_absences():
     if not os.path.exists(ABSENCES_FILE):
@@ -62,8 +67,6 @@ def get_type_name(t_code):
     return t_code
 
 
-# --- ФУНКЦИИ ИНТЕРФЕЙСА ---
-
 def show_all():
     data = load_absences()
     print("\n=== ТЕКУЩИЕ ОТСУТСТВИЯ ===")
@@ -71,8 +74,7 @@ def show_all():
         print("Список пуст.")
         return
 
-    # Сортировка: сначала реальные, потом симуляции (или наоборот, как удобнее)
-    # Здесь: Сначала те, где НЕТ [SIMULATION], затем дата
+    # Сортировка: сначала реальные, потом из симуляции
     sorted_absences = sorted(data["absences"],
                              key=lambda x: (x.get('comment', '').find('[SIMULATION]') != -1, x['from']))
 
@@ -87,7 +89,7 @@ def show_all():
 
 
 def add_absence():
-    print("\n--- ДОБАВЛЕНИЕ (РУЧНОЕ) ---")
+    print("\nДОБАВЛЕНИЕ (РУЧНОЕ)")
     driver_id = input("Табельный номер водителя: ").strip()
 
     print("Тип: 1 - Больничный, 2 - Отпуск, 3 - Прочее")
@@ -111,17 +113,16 @@ def add_absence():
     dt_to = validate_date(date_to_str)
 
     if not dt_from or not dt_to or dt_to < dt_from:
-        print("❌ Ошибка в датах.")
+        print("Ошибка в датах.")
         return
 
     data = load_absences()
-    # Проверка на дубликаты
     for item in data["absences"]:
         if item["driver_id"] == driver_id:
             exist_start = validate_date(item["from"])
             exist_end = validate_date(item["to"])
             if check_overlap(dt_from, dt_to, exist_start, exist_end):
-                print(f"⚠️ Пересечение: {item['type']} ({item['from']} - {item['to']})")
+                print(f"Пересечение: {item['type']} ({item['from']} - {item['to']})")
                 if input("Добавить всё равно? (да/нет): ").lower() != "да":
                     return
 
@@ -133,11 +134,11 @@ def add_absence():
         "comment": comment
     })
     save_absences(data)
-    print("✅ Запись добавлена.")
+    print("Запись добавлена.")
 
 
 def extend_sick_leave():
-    print("\n--- ПРОДЛЕНИЕ БОЛЬНИЧНОГО ---")
+    print("\nПРОДЛЕНИЕ БОЛЬНИЧНОГО")
     driver_id = input("Табельный номер водителя: ").strip()
     data = load_absences()
 
@@ -159,13 +160,13 @@ def extend_sick_leave():
     current_end = validate_date(item['to'])
 
     if not new_dt or new_dt <= current_end:
-        print("❌ Новая дата должна быть больше текущей.")
+        print("Новая дата должна быть больше текущей.")
         return
 
     data["absences"][idx]["to"] = new_date
     data["absences"][idx]["comment"] = (item.get("comment", "") + " (Продлен)").strip()
     save_absences(data)
-    print("✅ Больничный продлен.")
+    print("Больничный продлен.")
 
 
 def remove_absence():
@@ -173,7 +174,6 @@ def remove_absence():
     data = load_absences()
     if not data["absences"]: return
 
-    # Сортировка должна совпадать с show_all!
     sorted_absences = sorted(data["absences"],
                              key=lambda x: (x.get('comment', '').find('[SIMULATION]') != -1, x['from']))
 
@@ -183,7 +183,7 @@ def remove_absence():
             to_remove = sorted_absences[num]
             data["absences"].remove(to_remove)
             save_absences(data)
-            print("✅ Удалено.")
+            print("Удалено.")
         else:
             print("Неверный номер.")
     except ValueError:
@@ -198,7 +198,7 @@ def clear_simulation_only():
     removed = original_count - len(data["absences"])
     if removed > 0:
         save_absences(data)
-        print(f"✅ Удалено {removed} записей моделирования.")
+        print(f"Удалено {removed} записей моделирования.")
     else:
         print("Записей моделирования не найдено.")
 
@@ -206,54 +206,48 @@ def clear_simulation_only():
 def clear_all():
     if input("Удалить АБСОЛЮТНО ВСЕ записи? (да/нет): ").lower() == "да":
         save_absences({"absences": []})
-        print("🗑️ База очищена.")
+        print("База очищена.")
 
 
 def generate_random_absences():
-    print("\n--- ГЕНЕРАТОР ОТСУТСТВИЙ (МОДЕЛИРОВАНИЕ) ---")
+    print("\nГЕНЕРАТОР ОТСУТСТВИЙ (МОДЕЛИРОВАНИЕ)")
 
-    # === ОТКЛЮЧЕНИЕ ЛОГОВ В КОНСОЛЬ ===
-    # Мы ищем логгеры, которые могут шуметь, и ставим им уровень WARNING
-    # Это скроет INFO сообщения о загрузке, но покажет ошибки, если будут
     logging.getLogger("src.database").setLevel(logging.WARNING)
     logging.getLogger("database").setLevel(logging.WARNING)
 
-    print("⏳ Загружаю список водителей...")
+    print("Загружаю список водителей...")
 
-    # Передаем абсолютный путь к папке data, чтобы database.py точно нашел файлы
     loader = DataLoader(data_folder=os.path.join(project_root, "data"))
     loader.load_all()
 
     all_drivers = loader.drivers
 
-    # Фильтрация по месяцу из конфига
     current_month = config.SELECTED_MONTH
     month_drivers = [d for d in all_drivers if d.month == current_month]
 
     if not month_drivers:
-        print(f"❌ В базе нет водителей за месяц {current_month} (или проверьте config.py).")
+        print(f"В базе нет водителей за месяц {current_month} (или проверьте config.py).")
         return
 
-    # Фильтрация по маршруту
     candidates = []
     if getattr(config, "PROCESS_ALL_ROUTES", True):
-        print(f"🌍 Режим: Все маршруты ({len(month_drivers)} водителей доступно)")
+        print(f"Режим: Все маршруты ({len(month_drivers)} водителей доступно)")
         candidates = month_drivers
     else:
         target_route = str(getattr(config, "SELECTED_ROUTE", "1"))
-        print(f"🎯 Режим: Только маршрут {target_route}")
+        print(f"Режим: Только маршрут {target_route}")
         candidates = [d for d in month_drivers if str(d.assigned_route_number) == target_route]
         print(f"   Найдено {len(candidates)} водителей на маршруте.")
 
     if not candidates:
-        print("❌ Нет водителей для выбора.")
+        print("Нет водителей для выбора.")
         return
 
     # Ввод данных
     start_date_str = input("\nДата начала (ГГГГ-ММ-ДД): ").strip()
     dt_start = validate_date(start_date_str)
     if not dt_start:
-        print("❌ Неверная дата.")
+        print("Неверная дата.")
         return
 
     try:
@@ -261,17 +255,17 @@ def generate_random_absences():
         dt_end = dt_start + timedelta(days=duration - 1)
         end_date_str = dt_end.strftime("%Y-%m-%d")
     except ValueError:
-        print("❌ Длительность должна быть числом.")
+        print("Длительность должна быть числом.")
         return
 
-    print(f"📅 Период: {start_date_str} - {end_date_str}")
+    print(f"Период: {start_date_str} - {end_date_str}")
 
     try:
         count_sick = int(input("Кол-во больничных: "))
         count_vac = int(input("Кол-во отпусков: "))
         count_other = int(input("Кол-во прочих: "))
     except ValueError:
-        print("❌ Вводите только числа.")
+        print("Вводите только числа.")
         return
 
     total_needed = count_sick + count_vac + count_other
@@ -279,12 +273,11 @@ def generate_random_absences():
         print("Выбрано 0 человек.")
         return
 
-    # Проверка занятости
     data = load_absences()
     existing_absences = data["absences"]
     available_drivers = []
 
-    print("🔍 Проверка занятости...")
+    print("Проверка занятости...")
     for driver in candidates:
         is_busy = False
         for rec in existing_absences:
@@ -298,12 +291,11 @@ def generate_random_absences():
             available_drivers.append(driver)
 
     if len(available_drivers) < total_needed:
-        print(f"⚠️  Недостаточно свободных водителей! (Нужно {total_needed}, доступно {len(available_drivers)})")
+        print(f"Недостаточно свободных водителей! (Нужно {total_needed}, доступно {len(available_drivers)})")
         if input("Заполнить теми, кто есть? (да/нет): ").lower() != "да":
             return
         total_needed = len(available_drivers)
 
-    # Генерация
     random.shuffle(available_drivers)
 
     selected_sick = available_drivers[:count_sick]
@@ -314,7 +306,7 @@ def generate_random_absences():
 
     selected_other = rem[:count_other]
 
-    # Сохранение
+
     def make_entry(d, t):
         return {
             "driver_id": str(d.id),
@@ -332,11 +324,10 @@ def generate_random_absences():
     data["absences"].extend(new_entries)
     save_absences(data)
 
-    print(f"\n✅ Добавлено {len(new_entries)} записей.")
-    print("ℹ️  Используйте пункт 6 меню, чтобы удалить их.")
+    print(f"\nДобавлено {len(new_entries)} записей.")
+    print("Используйте пункт 6 меню, чтобы удалить их.")
 
 
-# --- МЕНЮ ---
 
 def main():
     while True:

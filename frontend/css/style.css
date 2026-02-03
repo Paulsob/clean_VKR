@@ -1,0 +1,63 @@
+body {
+    background-color: #f8f9fa;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.day-number {
+    font-weight: bold;
+    font-size: 1.1em;
+    padding: 5px;
+}
+
+.schedule-btn {
+    font-size: 0.8em;
+    padding: 2px 5px;
+}
+
+.table-success .day-number {
+    color: #198754;
+    background-color: #d1e7dd;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 5px;
+}
+
+.table-primary .day-number {
+    color: #0d6efd;
+    background-color: #cfe2ff;
+    border: 2px solid #0d6efd;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 5px;
+}
+
+#calendar-container {
+    box-shadow: 0 0.5rem 1rem rgba(0,0,0,.15);
+}
+
+.schedule-table td:nth-child(8),
+.schedule-table th:nth-child(8) {
+    border-left: 3px solid #000;
+}
+
+.card {
+    margin-bottom: 1.5rem;
+    box-shadow: 0 0.25rem 0.75rem rgba(0,0,0,.05);
+}
+
+.list-group-item {
+    border-left: 3px solid #0d6efd;
+}
+
+.list-group-item:nth-child(2) { border-left-color: #198754; }
+.list-group-item:nth-child(3) { border-left-color: #ffc107; }
+.list-group-item:nth-child(4) { border-left-color: #dc3545; }
+.list-group-item:nth-child(5) { border-left-color: #6c757d; }
