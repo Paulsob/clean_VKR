@@ -14,9 +14,9 @@ from src.logger import get_logger
 # Инициализируем логгер для этого модуля
 logger = get_logger(__name__)
 
-os.makedirs("../../data", exist_ok=True)
-output_path = "../../data/schedule.json"
-file_path = "../../data/data.xlsx"
+os.makedirs("../../env_real/data", exist_ok=True)
+output_path = "../../env_real/data/schedule.json"
+file_path = "../../env_real/data/data.xlsx"
 
 sheet_names = pd.ExcelFile(file_path).sheet_names[2:]
 all_schedules = []

@@ -6,22 +6,33 @@ import calendar
 from datetime import date, timedelta
 from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
-from openpyxl.utils import get_column_letter
 
-# Добавляем путь к корню проекта для импорта логгера
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 sys.path.insert(0, project_root)
 
 from src.logger import get_logger
+from src.config import DATA_DIR, USE_SYNTHETIC_DATA
 
-# Инициализируем логгер для этого модуля
 logger = get_logger(__name__)
 
-# ================= НАСТРОЙКИ =================
-INPUT_FILE = '../../data/tabeles_2026/02_february_2026.xlsx'
-OUTPUT_DIR = '../../data/tabeles_2026'
 
+# Логика выбора файлов в зависимости от режима
+if USE_SYNTHETIC_DATA:
+    # Список файлов для синтетики
+    INPUT_FILES = [
+        "Приложение №1 График 4х2.xlsx",
+        "Приложение №2 График 5х2.xlsx",
+        "Приложение №3 График 3х2х3х1.xlsx"
+    ]
+    # Папка для сохранения результатов (генерируем табели туда же, в data/tabeles_gen)
+    OUTPUT_DIR = os.path.join(DATA_DIR, "tabeles_2026_generated")
+else:
+    # Один файл для реальных данных
+    INPUT_FILES = ["tabeles_2026/02_february_2026.xlsx"]
+    OUTPUT_DIR = os.path.join(DATA_DIR, "tabeles_2026")
+
+# Константы смен
 SHIFT_1 = 1
 SHIFT_2 = 2
 REST = 'В'
@@ -29,19 +40,15 @@ REST = 'В'
 # Праздники 2026 (для 5х2)
 HOLIDAYS_2026 = {
     (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9),
-    (2, 23),
-    (3, 8), (3, 9),
-    (5, 1), (5, 9), (5, 11),
-    (6, 12),
-    (11, 4)
+    (2, 23), (3, 8), (3, 9), (5, 1), (5, 9), (5, 11), (6, 12), (11, 4)
 }
 
-# Цикличные графики (кроме 5х2)
+# Цикличные графики
 CYCLIC_PATTERNS = {
     '4x2': [1, 1, 1, 1, 0, 0],
-    '3x2x3x1': [1, 1, 1, 0, 0, 1, 1, 1, 0],  # Ритм: 3р 2в 3р 1в
+    '3x2x3x1': [1, 1, 1, 0, 0, 1, 1, 1, 0],
     '3x4': [1, 1, 1, 0, 0, 0, 0],
-    '3x1x2x2': [1, 1, 1, 0, 1, 1, 0, 0],  # Ритм: 3р 1в 2р 2в
+    '3x1x2x2': [1, 1, 1, 0, 1, 1, 0, 0],
     '1x6': [1, 0, 0, 0, 0, 0, 0]
 }
 
@@ -59,7 +66,6 @@ def is_holiday(d):
 
 
 def get_5x2_val_for_date(d, mode):
-    """Логика 5х2 с праздниками"""
     if is_holiday(d) or d.weekday() >= 5:
         return REST
     norm_mode = normalize_key(mode)
@@ -67,46 +73,28 @@ def get_5x2_val_for_date(d, mode):
 
 
 def build_cycle_for_pattern(pattern_name, mode, mask):
-    """
-    Строит цикл смен с учетом специальной логики для 3x2x3x1 и 3x1x2x2 в режиме 1x2.
-    """
     norm_mode = normalize_key(mode)
-
-    # Обработка специальных графиков в режиме 1x2
     if '1x2' in norm_mode and ('3x2x3x1' in pattern_name or '3x1x2x2' in pattern_name):
-        # Разбиваем маску на блоки до выходных
         blocks = []
         current_block = []
-
-        for i, val in enumerate(mask):
+        for val in mask:
             if val == 1:
                 current_block.append(val)
             else:
                 if current_block:
                     blocks.append(current_block)
                     current_block = []
-                # Добавляем выходной(ые) как отдельный блок
-                blocks.append([0])  # Каждый выходной — отдельный блок
+                blocks.append([0])
+        if current_block: blocks.append(current_block)
 
-        if current_block:
-            blocks.append(current_block)
-
-        # Чередуем смены по блокам: первый блок — 2, второй — 1, третий — 2...
         cycle = []
-        shift_toggle = 2  # Начинаем с вечерней (как в примере: 2 2 2 В В 1 1 1 В)
-
+        shift_toggle = 2
         for block in blocks:
             for _ in block:
-                if block[0] == 1:  # Рабочий блок
-                    cycle.append(shift_toggle)
-                else:  # Выходной
-                    cycle.append(REST)
-            # Переключаем смену после каждого блока (даже после выходных!)
+                cycle.append(shift_toggle if block[0] == 1 else REST)
             shift_toggle = 1 if shift_toggle == 2 else 2
-
         return cycle
 
-    # Обычная логика для остальных
     if '1x2' in norm_mode:
         part1 = [(SHIFT_1 if x else REST) for x in mask]
         part2 = [(SHIFT_2 if x else REST) for x in mask]
@@ -126,10 +114,7 @@ def solve_cyclic(feb_vals, pattern_name, mode):
             break
     if not mask: return None
 
-    # Строим цикл с учетом новой логики
     cycle = build_cycle_for_pattern(pattern_name, mode, mask)
-
-    # Поиск смещения
     cycle_len = len(cycle)
     candidates = []
 
@@ -137,8 +122,10 @@ def solve_cyclic(feb_vals, pattern_name, mode):
         score = 0
         mismatch = False
         for i, val in enumerate(feb_vals):
-            theo = cycle[(offset + i) % cycle_len]
+            # Если данных в таблице меньше, чем дней (например, короткий шаблон), не падаем
+            if i >= len(feb_vals): break
 
+            theo = cycle[(offset + i) % cycle_len]
             val_s = str(val).replace('.0', '')
             if val_s.lower() in ['b', 'v']: val_s = REST
 
@@ -148,139 +135,129 @@ def solve_cyclic(feb_vals, pattern_name, mode):
             if is_w_act != is_w_theo:
                 mismatch = True
                 break
-
             if val_s == str(theo): score += 1
 
         if not mismatch:
             candidates.append((score, offset))
 
     if not candidates: return None
-
     best_offset = max(candidates, key=lambda x: x[0])[1]
 
-    # Генерация года
     jan1_offset = (best_offset - 31) % cycle_len
     full_seq = []
     for i in range(365):
         full_seq.append(cycle[(jan1_offset + i) % cycle_len])
-
     return full_seq
 
 
 def solve_5x2(feb_vals, mode):
     full_seq = []
     start_date = date(2026, 1, 1)
-
     for i in range(365):
         curr_date = start_date + timedelta(days=i)
         val = get_5x2_val_for_date(curr_date, mode)
         full_seq.append(val)
-
-    # Простая проверка совпадений (не строгая)
-    feb_slice = full_seq[31:59]
-    matches = sum(1 for i in range(28) if str(feb_vals[i]).replace('.0', '') == str(feb_slice[i]))
-    if matches < 15:
-        logger.warning("5х2 график не совпал более чем на 50% с февралем")
-
     return full_seq
 
 
-# ================= ЭКСПОРТ В EXCEL С ФОРМАТИРОВАНИЕМ =================
+# ================= ЭКСПОРТ И ФОРМАТИРОВАНИЕ =================
 
 def format_excel_file(filepath, month_num):
-    """
-    Открывает файл, применяет форматирование, пересчитывает 'вых.' и сохраняет.
-    """
     wb = load_workbook(filepath)
     ws = wb.active
-
-    # Шрифт Verdana 12 для всего
     font = Font(name='Verdana', size=12)
-
-    # Заливка для выходных
     holiday_fill = PatternFill(start_color="FFB7FD", end_color="FFB7FD", fill_type="solid")
 
-    # Определяем даты месяца
     year = 2026
     _, days_in_month = calendar.monthrange(year, month_num)
     start_date = date(year, month_num, 1)
 
-    # Индекс колонки "вых." (предполагаем, что она есть)
     col_names = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
     try:
-        col_vyh_index = col_names.index('вых.') + 1  # +1 потому что openpyxl индексирует с 1
+        col_vyh_index = col_names.index('вых.') + 1
     except ValueError:
-        logger.warning(f"В файле {filepath} не найдена колонка 'вых.'. Пропуск форматирования этой колонки")
         col_vyh_index = None
 
-    # Проходим по всем строкам (начиная со 2-й, т.к. 1-я — заголовки)
     for row_idx in range(2, ws.max_row + 1):
-        # Подсчет выходных для колонки "вых."
         if col_vyh_index:
             rest_count = 0
             for day_col in range(1, days_in_month + 1):
-                # Ищем колонку дня (по названию столбца)
                 day_col_letter = None
                 for c in range(1, ws.max_column + 1):
                     if str(ws.cell(row=1, column=c).value) == str(day_col):
                         day_col_letter = c
                         break
                 if day_col_letter:
-                    cell_val = str(ws.cell(row=row_idx, column=day_col_letter).value).strip()
-                    if cell_val == 'В':
-                        rest_count += 1
+                    val = str(ws.cell(row=row_idx, column=day_col_letter).value).strip()
+                    if val == 'В': rest_count += 1
             ws.cell(row=row_idx, column=col_vyh_index, value=rest_count)
 
-        # Форматирование дней
         for day_col in range(1, days_in_month + 1):
-            # Находим колонку дня
             col_letter = None
             for c in range(1, ws.max_column + 1):
                 if str(ws.cell(row=1, column=c).value) == str(day_col):
                     col_letter = c
                     break
-            if not col_letter:
-                continue
+            if not col_letter: continue
 
-            # Применяем шрифт ко всем ячейкам
             cell = ws.cell(row=row_idx, column=col_letter)
             cell.font = font
             cell.alignment = Alignment(horizontal='center')
-
-            # Проверяем, является ли день календарным выходным (для заливки)
             curr_date = start_date.replace(day=day_col)
             if curr_date.weekday() >= 5 or is_holiday(curr_date):
                 cell.fill = holiday_fill
 
-    # Автоподбор ширины столбцов
     for col in ws.columns:
         max_length = 0
-        column = col[0].column_letter  # Получаем букву столбца
+        column = col[0].column_letter
         for cell in col:
             try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(str(cell.value))
+                if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
             except:
                 pass
-        adjusted_width = min(max_length + 2, 20)  # Ограничиваем макс. ширину
-        ws.column_dimensions[column].width = adjusted_width
+        ws.column_dimensions[column].width = min(max_length + 2, 20)
 
     wb.save(filepath)
 
 
 # ================= MAIN =================
 
-def main():
-    logger.info("Запуск генератора табелей v5 (Специальные графики + Форматирование)")
+def load_and_merge_inputs():
+    """Загружает все входные файлы и объединяет их в один DataFrame"""
+    merged_df = pd.DataFrame()
 
-    if not os.path.exists(INPUT_FILE):
-        logger.error("Входной файл не найден")
+    for filename in INPUT_FILES:
+        full_path = os.path.join(DATA_DIR, filename)
+        if not os.path.exists(full_path):
+            logger.error(f"Файл не найден: {full_path}")
+            continue
+
+        logger.info(f"Загрузка файла: {filename}")
+        try:
+            df_part = pd.read_excel(full_path, dtype=str)
+            merged_df = pd.concat([merged_df, df_part], ignore_index=True)
+        except Exception as e:
+            logger.error(f"Ошибка при чтении {filename}: {e}")
+
+    return merged_df
+
+
+def main():
+    logger.info("Запуск генератора табелей")
+    logger.info(f"Режим данных: {'SYNTHETIC' if USE_SYNTHETIC_DATA else 'REAL'}")
+
+    # 1. Загружаем и склеиваем файлы
+    df = load_and_merge_inputs()
+
+    if df.empty:
+        logger.error("Нет данных для обработки (пустой DataFrame).")
         return
 
-    df = pd.read_excel(INPUT_FILE, dtype=str)
+    # 2. Нормализация колонок
     df.columns = [str(c).strip() for c in df.columns]
 
     day_cols = []
+    # Ищем колонки дней (1..28)
     for i in range(1, 29):
         if str(i) in df.columns: day_cols.append(str(i))
 
@@ -288,18 +265,22 @@ def main():
     for c in meta_cols:
         if c not in df.columns: df[c] = ""
 
+    # 3. Генерация годового расписания
     full_year_map = {}
     stats_ok = 0
 
     for idx, row in df.iterrows():
         grafik = normalize_key(row['График'])
         mode = str(row['Режим'])
+
+        # Собираем данные за февраль (или за кусок шаблона)
         feb_vals = []
         for d in day_cols:
             val = str(row[d]).strip()
             if val.lower() in ['b', 'v', 'nan']: val = REST
             feb_vals.append(val)
 
+        # Пытаемся решить задачу
         result_seq = None
         if '5x2' in grafik:
             result_seq = solve_5x2(feb_vals, mode)
@@ -310,21 +291,24 @@ def main():
             full_year_map[idx] = result_seq
             stats_ok += 1
         else:
-            logger.warning(f"Строка {idx}: Не удалось построить график {grafik}")
+            logger.warning(f"Строка {idx} (Таб {row.get('Таб.№')}): Не удалось построить график {grafik}")
             full_year_map[idx] = [""] * 365
 
-    logger.info(f"Успешно обработано: {stats_ok} графиков")
+    logger.info(f"Успешно обработано водителей: {stats_ok}")
 
+    # 4. Сохранение по месяцам
     if not os.path.exists(OUTPUT_DIR): os.makedirs(OUTPUT_DIR)
 
-    months = [1] + list(range(3, 13))
+    months = [1] + list(range(3, 13))  # Январь + Март-Декабрь
     m_names = {1: 'january', 2: 'february', 3: 'march', 4: 'april', 5: 'may', 6: 'june',
                7: 'july', 8: 'august', 9: 'september', 10: 'october', 11: 'november', 12: 'december'}
 
     for m in months:
         fname = f"{m:02d}_{m_names[m]}_2026.xlsx"
-        print(f"Создаем {fname}...")
-        logger.info(f"Создание файла {fname}")
+        # Сохраняем всегда в OUTPUT_DIR (который настроен через config)
+        out_path = os.path.join(OUTPUT_DIR, fname)
+
+        logger.info(f"Генерация: {fname}")
 
         _, days_cnt = calendar.monthrange(2026, m)
         doy_start = date(2026, m, 1).timetuple().tm_yday - 1
@@ -335,17 +319,14 @@ def main():
             vals = []
             d_idx = doy_start + (d - 1)
             for idx in df.index:
-                vals.append(full_year_map[idx][d_idx])
+                # Если график не сгенерировался, будет пусто
+                vals.append(full_year_map[idx][d_idx] if idx in full_year_map else "")
             new_df[str(d)] = vals
 
-        out_path = os.path.join(OUTPUT_DIR, fname)
         new_df.to_excel(out_path, index=False)
-
-        # Применяем форматирование
         format_excel_file(out_path, m)
-        logger.debug("Форматирование применено")
 
-    logger.info("Все файлы готовы!")
+    logger.info("Готово! Проверьте папку " + OUTPUT_DIR)
 
 
 if __name__ == "__main__":

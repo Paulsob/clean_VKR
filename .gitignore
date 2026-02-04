@@ -1,8 +1,14 @@
-data/
+env_real/data/
 
-outputs/
+env_real/outputs/
 
-history/
+env_real/history/
+
+env_synthetic/data/
+
+env_synthetic/outputs/
+
+env_synthetic/history/
 
 *.log
 

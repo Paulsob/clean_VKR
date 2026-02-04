@@ -13,8 +13,8 @@ from src.logger import get_logger
 logger = get_logger(__name__)
 
 # НАСТРОЙКИ ПУТЕЙ
-DRIVERS_PATH = "../../data/drivers_json/drivers_april.json"
-ASSIGNMENTS_PATH = "../../data/assignments.json"
+DRIVERS_PATH = "../../env_real/data/drivers_json/drivers_april.json"
+ASSIGNMENTS_PATH = "../../env_real/data/assignments.json"
 
 
 def sync_drivers():
