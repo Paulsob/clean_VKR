@@ -21,7 +21,7 @@ except ImportError:
 # --- Константы ---
 DATA_DIR = os.path.join(project_root, "env_synthetic", "data")
 SOURCE_BASE = os.path.join(DATA_DIR, "tabeles_2026_generated")
-JSON_BASE = os.path.join(DATA_DIR, "json_templates")
+JSON_BASE = os.path.join(DATA_DIR, "drivers_json")
 SUBFOLDERS = ["4x2", "5x2", "3x2x3x1"]
 
 ENG_TO_RU_TITLE = {
@@ -54,16 +54,17 @@ def convert_xlsx_to_json():
 
                 try:
                     m_num = get_month_number(month_ru)
+                    # Читаем файл
                     df = pd.read_excel(os.path.join(source_dir, filename), dtype=str)
 
-                    # Инициализируем структуру по твоему формату
+                    # Инициализируем структуру
                     final_json = {
                         "month": month_ru,
                         "year": 2026,
                         "drivers": []
                     }
 
-                    # Проходим по каждой строке (водителю)
+                    # Проходим по каждой строке
                     for _, row in df.iterrows():
                         driver_entry = {
                             "tab_number": int(row.get('Таб. №', row.get('Таб.№', 0))),
@@ -72,13 +73,17 @@ def convert_xlsx_to_json():
                             "days": []
                         }
 
-                        # Собираем дни (только те колонки, которые являются числами)
+                        # --- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
                         for col in df.columns:
-                            if col.isdigit():
+                            # Превращаем имя колонки в строку перед проверкой
+                            col_str = str(col)
+
+                            if col_str.isdigit():
                                 driver_entry["days"].append({
-                                    "day": int(col),
+                                    "day": int(col),  # Здесь можно оставить int(col), так как это число
                                     "value": str(row[col])
                                 })
+                        # -------------------------
 
                         final_json["drivers"].append(driver_entry)
 
@@ -93,6 +98,8 @@ def convert_xlsx_to_json():
 
                 except Exception as e:
                     print(f"⚠️ Ошибка в {filename}: {e}")
+                    import traceback
+                    traceback.print_exc()
 
 
 if __name__ == "__main__":

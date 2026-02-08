@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta, date
 from typing import List, Dict, Optional, Tuple, Any
 
-
 # Импорт функции определения типа дня
 from src.utils import get_day_type_by_date
 
@@ -27,7 +26,6 @@ class WorkforceAnalyzer:
                 self.history[str(did)] = {'end_dt': dt_val, 'duration': float(data['duration'])}
             except Exception:
                 continue
-
 
     def get_history_serializable(self):
         """Выгрузка истории для JSON"""
@@ -263,7 +261,6 @@ class WorkforceAnalyzer:
     #         "roster": roster
     #     }
 
-
     def generate_daily_roster(
             self,
             route_number: str,
@@ -280,7 +277,6 @@ class WorkforceAnalyzer:
             [route_number], day_of_month, target_month, target_year, mode
         )
         return results[route_number]
-
 
     def generate_daily_roster_for_all_routes(
             self,

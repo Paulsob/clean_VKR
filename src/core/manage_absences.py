@@ -5,15 +5,6 @@ import random
 import logging
 from datetime import datetime, timedelta
 
-"""
-9252 - 9
-9320 - 47
-10054 - 47
-10353 - 47
-10365 - 47
-"""
-
-
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 if project_root not in sys.path:
@@ -306,7 +297,6 @@ def generate_random_absences():
 
     selected_other = rem[:count_other]
 
-
     def make_entry(d, t):
         return {
             "driver_id": str(d.id),
@@ -326,7 +316,6 @@ def generate_random_absences():
 
     print(f"\nДобавлено {len(new_entries)} записей.")
     print("Используйте пункт 6 меню, чтобы удалить их.")
-
 
 
 def main():
