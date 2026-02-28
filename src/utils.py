@@ -1,15 +1,10 @@
 # src/utils.py
 from datetime import datetime, timedelta
+from src.constants import MONTH_MAP, WEEKDAY_NAMES, get_month_number
 
-# Карты для перевода
-MONTH_MAP = {
-    "Январь": 1, "Февраль": 2, "Март": 3, "Апрель": 4, "Май": 5, "Июнь": 6,
-    "Июль": 7, "Август": 8, "Сентябрь": 9, "Октябрь": 10, "Ноябрь": 11, "Декабрь": 12
-}
-
-WEEKDAY_NAMES = [
-    "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"
-]
+# Экспортируем для обратной совместимости
+__all__ = ['get_month_number', 'get_day_type_by_date', 'get_weekday_name', 
+           'parse_time', 'calculate_duration_hours']
 
 
 def _get_date_obj(day: int, month_str: str, year: int):
@@ -54,23 +49,3 @@ def calculate_duration_hours(start_str: str, end_str: str) -> float:
     duration = end - start
     return round(duration.total_seconds() / 3600, 2)
 
-
-def get_month_number(month_name: str) -> int:
-    months = [
-        "Январь",
-        "Февраль",
-        "Март",
-        "Апрель",
-        "Май",
-        "Июнь",
-        "Июль",
-        "Август",
-        "Сентябрь",
-        "Октябрь",
-        "Ноябрь",
-        "Декабрь"
-    ]
-    if month_name in months:
-        return months.index(month_name) + 1
-    else:
-        raise ValueError(f"Unknown month: {month_name}")

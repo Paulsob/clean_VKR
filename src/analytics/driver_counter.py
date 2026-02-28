@@ -10,7 +10,8 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 import src.config as config
-from src.utils import get_month_number
+from src.constants import get_month_number
+from src.common_utils import get_month_sequence
 from src.logger import get_logger
 
 logger = get_logger("Analytics")
@@ -39,25 +40,7 @@ class DriverStatsCounter:
 
     def _get_month_sequence(self, start_month: str, start_year: int, duration: int) -> List[Tuple[str, int]]:
         """Генерирует последовательность (Месяц, Год)."""
-        months_names = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-                        "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
-        try:
-            start_idx = get_month_number(start_month) - 1
-        except:
-            start_idx = 0
-
-        sequence = []
-        current_idx = start_idx
-        current_year = start_year
-
-        for _ in range(duration):
-            m_name = months_names[current_idx]
-            sequence.append((m_name, current_year))
-            current_idx += 1
-            if current_idx >= 12:
-                current_idx = 0
-                current_year += 1
-        return sequence
+        return get_month_sequence(start_month, start_year, duration)
 
     def count_unique_drivers(self,
                              start_month: str = None,

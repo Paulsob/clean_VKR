@@ -74,16 +74,12 @@ def process_single_route_json(json_path, route_num, all_drivers_db, month_num):
                 t_range = shift_data.get("time_range", "")
 
                 # 2. СРЫВ (Смена в плане есть, но водитель не назначен)
-                # Проверяем: либо имя пустое, либо явно написано "НЕТ ВОДИТЕЛЯ",
-                # либо в данных есть время, но нет ID водителя.
                 is_no_driver = not d_name or d_name == "НЕТ ВОДИТЕЛЯ" or not shift_data.get("driver")
 
                 if is_no_driver:
-                    # Если есть время, но нет водителя — красим в красный
-                    # Если нет даже времени — обычно это тоже считается срывом, если объект смены создан
                     return "[FAIL]", t_range, False
 
-                # 3. ВОДИТЕЛЬ НАЗНАЧЕН (Логика без изменений)
+                # 3. ВОДИТЕЛЬ НАЗНАЧЕН
                 d_raw_id = shift_data.get("driver", "").split(" ")[0]
                 has_warn = bool(shift_data.get("warnings"))
                 is_weekend_work = False
@@ -120,7 +116,7 @@ def process_single_route_json(json_path, route_num, all_drivers_db, month_num):
 
 def add_legend(ws):
     fill_success = PatternFill("solid", fgColor="C6EFCE")
-    fill_fail = PatternFill("solid", fgColor="FF5555")  # Ярко-красный
+    fill_fail = PatternFill("solid", fgColor="FF5555")
     fill_warn = PatternFill("solid", fgColor="FFEB9C")
     fill_weekend = PatternFill("solid", fgColor="FFC000")
     font_bold = Font(bold=True)
@@ -152,10 +148,10 @@ def add_legend(ws):
 
 def style_worksheet(ws):
     fill_header = PatternFill("solid", fgColor="4F81BD")
-    fill_success = PatternFill("solid", fgColor="C6EFCE")  # Зеленый
-    fill_fail = PatternFill("solid", fgColor="FF5555")  # Красный
-    fill_warn = PatternFill("solid", fgColor="FFEB9C")  # Желтый
-    fill_weekend = PatternFill("solid", fgColor="FFC000")  # Оранжевый
+    fill_success = PatternFill("solid", fgColor="C6EFCE")
+    fill_fail = PatternFill("solid", fgColor="FF5555")
+    fill_warn = PatternFill("solid", fgColor="FFEB9C")
+    fill_weekend = PatternFill("solid", fgColor="FFC000")
 
     font_header = Font(bold=True, color="FFFFFF")
 
@@ -170,7 +166,7 @@ def style_worksheet(ws):
         cell.fill = fill_header
         cell.alignment = Alignment(horizontal='center')
 
-    # Определение границ дней (для жирной линии внизу дня)
+    # Определение границ дней
     day_end_rows = []
     current_day = None
     data_start = HEADER_ROW_IDX + 1
@@ -189,36 +185,33 @@ def style_worksheet(ws):
         is_day_end = row[0].row in day_end_rows
         current_border = thick_bottom if is_day_end else border
 
-        # 1. Сначала применяем базовые стили (границы и выравнивание)
         for cell in row:
             cell.border = current_border
             cell.alignment = Alignment(horizontal='center', vertical='center')
 
-        # 2. Получаем текст из колонки "Проблемы" (Индекс 6 / Колонка G)
+        # Получаем текст из колонки "Проблемы" (Индекс 6 / Колонка G)
         issues_text = str(row[6].value) if row[6].value else ""
 
-        # 3. Обработка колонок водителей (C=индекс 2, E=индекс 4)
+        # Обработка колонок водителей (C=индекс 2, E=индекс 4)
         for idx in [2, 4]:
             cell = row[idx]
             val = str(cell.value) if cell.value else ""
 
-            # --- НОВАЯ ЛОГИКА ПО ТЕКСТУ ИЗ "ПРОБЛЕМЫ" ---
+            # Логика по тексту из "ПРОБЛЕМЫ"
             if idx == 2 and "Нет водителя (1)" in issues_text:
                 cell.fill = fill_fail
             elif idx == 4 and "Нет водителя (2)" in issues_text:
                 cell.fill = fill_fail
-
-            # --- СТАНДАРТНАЯ ЛОГИКА ---
+            # Стандартная логика
             elif "[FAIL]" in val:
                 cell.fill = fill_fail
-                cell.value = ""  # Очищаем метку, оставляя цвет
+                cell.value = ""
             elif "[ВЫХ]" in val:
                 cell.fill = fill_weekend
                 cell.value = val.replace(" [ВЫХ]", "")
             elif "(!)" in val:
                 cell.fill = fill_warn
             elif val and val.strip() != "":
-                # Если ячейка не пустая и не попала под условия выше — значит всё ОК (зеленый)
                 cell.fill = fill_success
 
     # Закрепление области
@@ -244,20 +237,35 @@ def main():
     m_num = MONTH_TO_NUM.get(SELECTED_MONTH, 1)
     month_str = f"{m_num:02d}"
 
-    base_results_dir = os.path.join(
-        "data", "results",
-        f"{month_str}_{SELECTED_MONTH}_{SELECTED_YEAR}",
-        SIMULATION_MODE
+    # === ОБНОВЛЕННЫЙ ПУТЬ К ИСХОДНЫМ ДАННЫМ ===
+    # Новая структура: env_synthetic/data/results/<паттерн>/<месяц>/<режим>/
+    synthetic_root = os.path.join("env_synthetic", "data", "results")
+
+    if not os.path.exists(synthetic_root):
+        logger.error(f"Папка с данными не найдена: {synthetic_root}")
+        logger.error(f"Текущая рабочая директория: {os.getcwd()}")
+        return
+
+    month_folder_name = f"{month_str}_{SELECTED_MONTH}_{SELECTED_YEAR}"
+
+    # Шаблон поиска учитывает промежуточную папку маршрута (3x2x3x1, 4x2, 5x2) через *
+    search_pattern = os.path.join(
+        synthetic_root,
+        "*",  # Папка паттерна маршрута
+        month_folder_name,
+        SIMULATION_MODE,
+        f"simulation_{SIMULATION_MODE}_*_{SELECTED_MONTH}_{SELECTED_YEAR}.json"
     )
-    search_pattern = os.path.join(base_results_dir,
-                                  f"simulation_{SIMULATION_MODE}_*_{SELECTED_MONTH}_{SELECTED_YEAR}.json")
+
     found_files = glob.glob(search_pattern)
+    # =========================================
 
     if not found_files:
-        logger.error(f"Файлы не найдены: {base_results_dir}")
+        logger.error(f"Файлы не найдены по маске: {search_pattern}")
         return
 
     files_to_process = []
+    processed_routes = set()  # Для предотвращения дублирования листов
 
     def get_route_from_filename(path):
         m = re.search(f"simulation_{SIMULATION_MODE}_(\\d+)_", os.path.basename(path))
@@ -267,7 +275,17 @@ def main():
 
     for fp in found_files:
         r_num = get_route_from_filename(fp)
-        if target_route and r_num != target_route: continue
+
+        # Фильтрация по выбранному маршруту
+        if target_route and r_num != target_route:
+            continue
+
+        # Проверка на дубликаты (если один маршрут найден в разных папках паттернов)
+        if r_num in processed_routes:
+            logger.warning(f"Маршрут {r_num} уже добавлен в обработку, пропускаем дубликат: {fp}")
+            continue
+
+        processed_routes.add(r_num)
         files_to_process.append((r_num, fp))
 
     files_to_process.sort(key=lambda x: int(x[0]) if x[0].isdigit() else 9999)
@@ -288,7 +306,7 @@ def main():
     writer = pd.ExcelWriter(out_path, engine='openpyxl')
 
     for r_num, f_path in files_to_process:
-        logger.info(f"Обработка маршрута {r_num}...")
+        logger.info(f"Обработка маршрута {r_num} из файла {f_path}...")
         rows = process_single_route_json(f_path, r_num, db.drivers, m_num)
 
         if not rows: continue
@@ -297,6 +315,11 @@ def main():
         df_clean = df.drop(columns=["_day_int"])
 
         sheet_name = f"Маршрут {r_num}"
+        # Дополнительная защита от дубликатов имен листов
+        if sheet_name in writer.sheets:
+            logger.warning(f"Лист {sheet_name} уже существует, пропускаем.")
+            continue
+
         df_clean.to_excel(writer, index=False, sheet_name=sheet_name, startrow=HEADER_ROW_IDX - 1)
 
         ws = writer.sheets[sheet_name]

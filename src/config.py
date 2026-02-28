@@ -1,8 +1,15 @@
 import os
-from src.utils import get_month_number
-from src.logger import get_logger
+from src.constants import get_month_number
 
-logger = get_logger(__name__)
+# Отложенная инициализация логгера (избегаем циклической зависимости)
+_logger = None
+
+def _get_logger():
+    global _logger
+    if _logger is None:
+        from src.logger import get_logger
+        _logger = get_logger(__name__)
+    return _logger
 
 # 1. ГЛАВНЫЙ ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМА
 # True  -> Работаем в папке env_synthetic
@@ -16,8 +23,8 @@ PROCESS_ALL_ROUTES = True
 SELECTED_ROUTE = "47"
 SELECTED_MONTH = "Январь"
 SELECTED_YEAR = 2026
-SIMULATION_MODE = "strict"  # strict / real
-SIMULATION_DURATION = 1   # длительность симуляции в месяцах
+SIMULATION_MODE = "real"  # strict / real
+SIMULATION_DURATION = 2   # длительность симуляции в месяцах
 
 """
 Используется английская x
@@ -32,7 +39,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 if USE_SYNTHETIC_DATA:
     ENV_FOLDER_NAME = "env_synthetic"
-    logger.info(f"РЕЖИМ СИНТЕТИКИ: Работаем в папке {ENV_FOLDER_NAME}, график {SELECTED_PATTERN}")
+    _get_logger().info(f"РЕЖИМ СИНТЕТИКИ: Работаем в папке {ENV_FOLDER_NAME}, график {SELECTED_PATTERN}")
 else:
     ENV_FOLDER_NAME = "env_real"
 
@@ -84,3 +91,16 @@ filename_book = f"schedule_book_{SIMULATION_MODE}_{SELECTED_ROUTE}_{SELECTED_MON
 SCHEDULE_BOOK_REPORT_FILE = os.path.join(
     OUTPUTS_DIR, "SCHEDULE_BOOKS", directory_name_common, SIMULATION_MODE, filename_book
 )
+
+
+# 6. PATH MANAGER (Новый централизованный менеджер путей)
+from src.path_manager import PathManager
+
+path_manager = PathManager(
+    base_dir=BASE_DIR,
+    use_synthetic=USE_SYNTHETIC_DATA,
+    selected_pattern=SELECTED_PATTERN
+)
+
+# Обеспечиваем создание директорий
+path_manager.ensure_directories()

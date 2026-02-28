@@ -4,7 +4,7 @@ import json
 import calendar
 from datetime import date
 from typing import List
-import logging  # !!! ДОБАВЛЕН ИМПОРТ
+import logging
 
 # Настройка путей
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -16,49 +16,29 @@ import src.config as config
 from src.prepare_data.database import DataLoader
 from src.core.scheduler import WorkforceAnalyzer
 from src.logger import get_logger
-from src.utils import get_month_number
+from src.constants import get_month_number
+from src.common_utils import get_month_sequence, get_previous_month
 
 logger = get_logger(__name__)
 
 logging.getLogger("src.core.scheduler").setLevel(logging.DEBUG)
 
-def get_month_sequence(start_month_name, start_year, duration_months):
-    # ... код дальше без изменений ...
-    months_names = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-                    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
-    try:
-        start_idx = get_month_number(start_month_name) - 1
-    except:
-        start_idx = 0
-    sequence = []
-    current_idx = start_idx
-    current_year = start_year
-    for _ in range(duration_months):
-        m_name = months_names[current_idx]
-        sequence.append((m_name, current_year))
-        current_idx += 1
-        if current_idx >= 12:
-            current_idx = 0
-            current_year += 1
-    return sequence
-
-
 def get_dynamic_paths(route_number, month_name, year, mode):
-    m_num = get_month_number(month_name)
-    folder_name = f"{m_num:02d}_{month_name}_{year}"
-
-    sim_output_dir = os.path.join(config.RESULTS_DIR, folder_name, mode)
-    hist_output_dir = os.path.join(config.HISTORY_DIR, folder_name, mode)
-
-    os.makedirs(sim_output_dir, exist_ok=True)
-    os.makedirs(hist_output_dir, exist_ok=True)
-
-    res_filename = f"simulation_{mode}_{route_number}_{month_name}_{year}.json"
-    sim_result_path = os.path.join(sim_output_dir, res_filename)
-
-    hist_filename = f"history_{mode}_{route_number}_{month_name}_{year}.json"
-    new_history_path = os.path.join(hist_output_dir, hist_filename)
-
+    """Использует PathManager для получения путей."""
+    sim_result_path = config.path_manager.get_simulation_file_path(
+        route=route_number,
+        month=month_name,
+        year=year,
+        mode=mode
+    )
+    
+    new_history_path = config.path_manager.get_history_file_path(
+        route=route_number,
+        month=month_name,
+        year=year,
+        mode=mode
+    )
+    
     return sim_result_path, new_history_path
 
 
@@ -72,18 +52,8 @@ def run_simulation_sequence(routes_list, db, start_month, start_year, duration, 
     analyzer = WorkforceAnalyzer(db)
 
     # 2. Загрузка предыстории
-    months_names = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-                    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
     first_m_name, first_y = timeline[0]
-    first_m_num = get_month_number(first_m_name)
-
-    if first_m_num == 1:
-        prev_month_num = 12
-        prev_year = first_y - 1
-    else:
-        prev_month_num = first_m_num - 1
-        prev_year = first_y
-    prev_month_name = months_names[prev_month_num - 1]
+    prev_month_name, prev_year = get_previous_month(first_m_name, first_y)
 
     try:
         loaded = analyzer.load_history_for_all_routes(routes_list, prev_month_name, prev_year)
