@@ -1,18 +1,28 @@
 import json
 import os
 from typing import List, Dict
-from datetime import datetime, timedelta
-
+from datetime import datetime
 from src.prepare_data.models import Driver, RouteSchedule, Assignment, Absence
 from src.logger import get_logger
 import src.config as config
 
 logger = get_logger(__name__)
 
+# КАРТА СМЕЩЕНИЙ ID (чтобы ID оставались int, но были уникальными)
+# 4x2: 1..9999
+# 5x2: 10001..19999
+# 5x2_holidays: 20001..29999
+PATTERN_OFFSETS = {
+    "4x2": 0,
+    "5x2": 10000,
+    "5х2_holiday": 20000,
+    "3x2x3x1": 30000
+}
+
 
 class LoadingStats:
     """Статистика загрузки данных для отчетности."""
-    
+
     def __init__(self):
         self.drivers_loaded = 0
         self.drivers_failed = 0
@@ -22,40 +32,25 @@ class LoadingStats:
         self.files_processed = 0
         self.files_failed = 0
         self.errors = []
-    
+
     def add_error(self, context: str, error: Exception, filepath: str = None):
-        """Добавляет ошибку в статистику."""
         error_msg = f"{context}: {str(error)}"
         if filepath:
             error_msg = f"{filepath} - {error_msg}"
         self.errors.append(error_msg)
         logger.error(error_msg)
-    
+
     def log_summary(self):
-        """Выводит итоговую статистику загрузки."""
         logger.info("=" * 60)
         logger.info("СТАТИСТИКА ЗАГРУЗКИ ДАННЫХ")
         logger.info(f"Водители: {self.drivers_loaded} загружено, {self.drivers_failed} пропущено")
         logger.info(f"Расписания: {self.schedules_loaded}")
-        logger.info(f"Закрепления: {self.assignments_loaded}")
-        logger.info(f"Отсутствия: {self.absences_loaded}")
-        logger.info(f"Файлы: {self.files_processed} обработано, {self.files_failed} с ошибками")
-        
-        if self.errors:
-            logger.warning(f"Обнаружено {len(self.errors)} ошибок при загрузке:")
-            for i, err in enumerate(self.errors[:5], 1):  # Показываем первые 5
-                logger.warning(f"  {i}. {err}")
-            if len(self.errors) > 5:
-                logger.warning(f"  ... и еще {len(self.errors) - 5} ошибок")
-        else:
-            logger.info("✓ Загрузка завершена без ошибок")
         logger.info("=" * 60)
 
 
 class DataLoader:
     def __init__(self, data_folder: str = None):
         self.data_folder = data_folder if data_folder else config.DATA_DIR
-
         if not os.path.exists(self.data_folder):
             raise FileNotFoundError(f"Папка с данными не найдена: {self.data_folder}")
 
@@ -63,11 +58,7 @@ class DataLoader:
         self.schedules: List[RouteSchedule] = []
         self.assignments: List[Assignment] = []
         self.absences: List[Absence] = []
-
-        # Словарь для хранения рассчитанных норм: { "driver_id": float_hours }
         self.driver_norms: Dict[str, float] = {}
-        
-        # Статистика загрузки
         self.stats = LoadingStats()
 
     def load_all(self):
@@ -77,60 +68,38 @@ class DataLoader:
         self._load_assignments()
         self._link_drivers_to_routes()
         self._load_absences()
-
-        # НОВЫЙ ШАГ: Расчет норм выработки
         self._calculate_and_save_norms()
-
-        # Выводим статистику
         self.stats.log_summary()
-        logger.info("Загрузка данных завершена")
 
     def _load_drivers(self):
-        """Загружает водителей в зависимости от режима конфигурации."""
+        """Загружает водителей, добавляя математическое смещение к ID для уникальности."""
         drivers_base_dir = os.path.join(config.DATA_DIR, "drivers_json")
-
         if not os.path.exists(drivers_base_dir):
             logger.error(f"Папка водителей не найдена: {drivers_base_dir}")
             return
 
-        json_files_to_load = []
+        json_files_map = []  # [(path, pattern_name)]
 
         if config.USE_SYNTHETIC_DATA:
-            pattern = config.SELECTED_PATTERN
-            if pattern and pattern.lower() != "all":
-                target_folder = os.path.join(drivers_base_dir, pattern)
-                if os.path.exists(target_folder):
-                    folders_to_scan = [target_folder]
-                    logger.info(f"[SYNTHETIC] Загружаю только график: {pattern}")
-                else:
-                    logger.error(f"Папка для графика {pattern} не найдена в {drivers_base_dir}")
-                    return
-            else:
-                logger.warning("[SYNTHETIC] Выбран режим ALL - загружаю все графики в кучу!")
-                folders_to_scan = [os.path.join(drivers_base_dir, d) for d in os.listdir(drivers_base_dir) if
-                                   os.path.isdir(os.path.join(drivers_base_dir, d))]
+            patterns = config.INPUT_PATTERNS
+            logger.info(f"[SYNTHETIC] Загружаю графики: {patterns}")
 
-            for folder_path in folders_to_scan:
-                try:
+            for pattern in patterns:
+                folder_path = os.path.join(drivers_base_dir, pattern)
+                if os.path.exists(folder_path):
                     for fname in os.listdir(folder_path):
                         if fname.endswith(".json"):
-                            json_files_to_load.append(os.path.join(folder_path, fname))
-                except OSError:
-                    pass
+                            full_path = os.path.join(folder_path, fname)
+                            json_files_map.append((full_path, pattern))
+                else:
+                    logger.warning(f"Папка графика {pattern} не найдена в {drivers_base_dir}")
         else:
-            logger.info(f"[REAL] Сканирую файлы месяцев в {drivers_base_dir}")
-            for f_name in os.listdir(drivers_base_dir):
-                if f_name.endswith('.json'):
-                    json_files_to_load.append(os.path.join(drivers_base_dir, f_name))
+            for fname in os.listdir(drivers_base_dir):
+                if fname.endswith(".json"):
+                    json_files_map.append((os.path.join(drivers_base_dir, fname), "real"))
 
-        if not json_files_to_load:
-            logger.warning("Не найдено файлов водителей для загрузки.")
-            return
-
-        json_files_to_load.sort()
         self.drivers = []
-
-        for filepath in json_files_to_load:
+        for filepath, pattern_name in json_files_map:
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
                     data = json.load(f)
@@ -139,57 +108,55 @@ class DataLoader:
 
                     for d_dict in drivers_list:
                         try:
+                            # --- УНИКАЛИЗАЦИЯ ID (Через смещение int) ---
+                            original_id = int(d_dict.get("tab_number") or d_dict.get("id"))
+
+                            if config.USE_SYNTHETIC_DATA:
+                                # Получаем смещение (0 для 4x2, 10000 для 5x2 и т.д.)
+                                # Если паттерна нет в списке, берем большое число 90000
+                                offset = PATTERN_OFFSETS.get(pattern_name, 90000)
+                                unique_id = original_id + offset
+                            else:
+                                unique_id = original_id
+
+                            # Обновляем словарь перед созданием объекта (чтобы Pydantic не ругался)
+                            d_dict["tab_number"] = unique_id
+                            d_dict["id"] = unique_id
+
+                            # Создаем объект
                             driver = Driver(**d_dict)
                             driver.month = month_name
+
+                            # ВАЖНО: Принудительно вешаем метку графика на объект
+                            # Pydantic может ее не пропустить в конструкторе, поэтому делаем setattr
+                            setattr(driver, "schedule_pattern", pattern_name)
+
                             self.drivers.append(driver)
                             self.stats.drivers_loaded += 1
                         except Exception as e:
                             self.stats.drivers_failed += 1
-                            self.stats.add_error(
-                                f"Ошибка парсинга водителя (ID: {d_dict.get('tab_number', 'unknown')})",
-                                e,
-                                filepath
-                            )
-                
+                            # self.stats.add_error(f"Ошибка парсинга водителя {d_dict.get('tab_number')}", e, filepath)
+                            # Логируем только критичные ошибки, чтобы не спамить консоль
+                            if self.stats.drivers_failed <= 5:
+                                logger.warning(f"Ошибка водителя: {e}")
+
                 self.stats.files_processed += 1
-                
-            except json.JSONDecodeError as e:
-                self.stats.files_failed += 1
-                self.stats.add_error("Ошибка парсинга JSON", e, filepath)
             except Exception as e:
                 self.stats.files_failed += 1
                 self.stats.add_error("Ошибка чтения файла", e, filepath)
-
-        logger.info(f"Загружено записей о водителях: {len(self.drivers)}")
 
     def _load_schedules(self):
         path = os.path.join(self.data_folder, "schedule.json")
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                if isinstance(data, dict): 
-                    data = [data]
-                
-                for schedule_dict in data:
-                    try:
-                        schedule = RouteSchedule(**schedule_dict)
-                        self.schedules.append(schedule)
-                        self.stats.schedules_loaded += 1
-                    except Exception as e:
-                        route_num = schedule_dict.get("маршрут", schedule_dict.get("route_number", "unknown"))
-                        self.stats.add_error(
-                            f"Ошибка парсинга расписания маршрута {route_num}",
-                            e,
-                            path
-                        )
-                
-            logger.info(f"Загружены расписания для {len(self.schedules)} маршрутов")
-        except FileNotFoundError:
-            self.stats.add_error("Файл schedule.json не найден", FileNotFoundError(), path)
-        except json.JSONDecodeError as e:
-            self.stats.add_error("Ошибка парсинга JSON", e, path)
+            if isinstance(data, dict): data = [data]
+            for s_dict in data:
+                self.schedules.append(RouteSchedule(**s_dict))
+                self.stats.schedules_loaded += 1
         except Exception as e:
-            self.stats.add_error("Ошибка загрузки расписаний", e, path)
+            self.stats.add_error("Load Schedules", e)
+
 
     def _load_assignments(self):
         path = os.path.join(self.data_folder, "assignments.json")
@@ -208,7 +175,7 @@ class DataLoader:
                             e,
                             path
                         )
-                
+
             logger.info(f"Загружено закреплений: {len(self.assignments)} связей")
         except FileNotFoundError:
             if not config.USE_SYNTHETIC_DATA:
@@ -219,63 +186,22 @@ class DataLoader:
             self.stats.add_error("Ошибка загрузки закреплений", e, path)
 
     def _link_drivers_to_routes(self):
-        # 1. Реальные закрепления
-        for assign in self.assignments:
-            target_drivers = [d for d in self.drivers if int(d.id) == int(assign.driver_id)]
-            for d in target_drivers:
-                d.assigned_route_number = str(assign.route_number)
+        if not config.USE_SYNTHETIC_DATA: return
+        active_routes = [str(config.SELECTED_ROUTE)] if config.SELECTED_ROUTE else []
+        if config.PROCESS_ALL_ROUTES and self.schedules:
+            active_routes = sorted(list(set(str(s.route_number) for s in self.schedules)))
+        if not active_routes: return
 
-        # 2. Синтетика
-        if config.USE_SYNTHETIC_DATA:
-            logger.info("[SYNTHETIC] Распределяем водителей по маршрутам...")
-            active_routes = []
-            if config.PROCESS_ALL_ROUTES and self.schedules:
-                active_routes = sorted(list(set(str(s.route_number) for s in self.schedules)))
-            elif config.SELECTED_ROUTE:
-                active_routes = [str(config.SELECTED_ROUTE)]
+        unassigned = [d for d in self.drivers if not getattr(d, 'assigned_route_number', None)]
+        # Сортировка по числовому ID
+        unassigned.sort(key=lambda x: int(x.id))
 
-            if not active_routes:
-                return
-
-            unassigned_drivers = [d for d in self.drivers if not d.assigned_route_number]
-            unassigned_drivers.sort(key=lambda x: int(x.id) if str(x.id).isdigit() else x.id)
-
-            if not unassigned_drivers:
-                return
-
-            # Веса маршрутов
-            route_weights = {}
-            total_weight = 0
-            for r_num in active_routes:
-                r_schedules = [s for s in self.schedules if str(s.route_number) == r_num]
-                max_shifts = 0
-                for sched in r_schedules:
-                    shifts_in_day = 0
-                    for tram in sched.trams:
-                        if tram.shift_1: shifts_in_day += 1
-                        if tram.shift_2: shifts_in_day += 1
-                    if shifts_in_day > max_shifts: max_shifts = shifts_in_day
-
-                weight = max_shifts if max_shifts > 0 else 1
-                route_weights[r_num] = weight
-                total_weight += weight
-
-            # Распределение
-            total_drivers = len(unassigned_drivers)
-            current_driver_idx = 0
-            sorted_routes = sorted(active_routes)
-
-            for i, r_num in enumerate(sorted_routes):
-                if i == len(sorted_routes) - 1:
-                    count_to_assign = total_drivers - current_driver_idx
-                else:
-                    share = route_weights[r_num] / total_weight
-                    count_to_assign = int(total_drivers * share)
-
-                for _ in range(count_to_assign):
-                    if current_driver_idx < total_drivers:
-                        unassigned_drivers[current_driver_idx].assigned_route_number = r_num
-                        current_driver_idx += 1
+        import math
+        chunk_size = math.ceil(len(unassigned) / len(active_routes))
+        for i, r_num in enumerate(active_routes):
+            chunk = unassigned[i*chunk_size : (i+1)*chunk_size]
+            for d in chunk:
+                d.assigned_route_number = r_num
 
     def _load_absences(self):
         absences_path = os.path.join(self.data_folder, "absences.json")
@@ -315,7 +241,7 @@ class DataLoader:
                         e,
                         absences_path
                     )
-                    
+
         except json.JSONDecodeError as e:
             self.stats.add_error("Ошибка парсинга JSON", e, absences_path)
         except Exception as e:

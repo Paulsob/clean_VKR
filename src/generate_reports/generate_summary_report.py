@@ -509,13 +509,17 @@ def main():
                         if isinstance(v, dict) and "roster" in v:
                             for t in v["roster"]:
                                 for s in ["shift_1", "shift_2"]:
-                                    if t.get(s) and t[s].get("driver"): w_ids.add(t[s]["driver"].split(" ")[0])
+                                    if t.get(s) and t[s].get("driver"):
+                                        w_ids.add(t[s]["driver"].split(" ")[0])
+                    # Теперь получаем всех подходящих водителей, не только с закрепленным маршрутом
                     route_assigned_drivers = [d for d in db.drivers if str(d.id) in w_ids and d.month == current_month]
                 except:
                     route_assigned_drivers = []
             else:
+                # Учитываем также водителей с универсальным доступом (ANY)
                 route_assigned_drivers = [d for d in db.drivers if
-                                          str(d.assigned_route_number) == route_num and d.month == current_month]
+                                          str(d.assigned_route_number) == route_num or
+                                          str(d.assigned_route_number).upper() == "ANY" and d.month == current_month]
 
             active, reserve, guests, stats, detailed, g_glob, any_glob = process_route(
                 route_num, file_path, route_assigned_drivers, db.drivers, absences_map, schedule_counts, m_num,

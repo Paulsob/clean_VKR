@@ -3,7 +3,7 @@ import os
 import json
 import calendar
 from datetime import date
-from typing import List
+from typing import List, Dict
 import logging
 
 # Настройка путей
@@ -20,38 +20,51 @@ from src.constants import get_month_number
 from src.common_utils import get_month_sequence, get_previous_month
 
 logger = get_logger(__name__)
+logging.getLogger("src.core.scheduler").setLevel(logging.WARNING)
 
-logging.getLogger("src.core.scheduler").setLevel(logging.DEBUG)
 
 def get_dynamic_paths(route_number, month_name, year, mode):
-    """Использует PathManager для получения путей."""
     sim_result_path = config.path_manager.get_simulation_file_path(
         route=route_number,
         month=month_name,
         year=year,
         mode=mode
     )
-    
     new_history_path = config.path_manager.get_history_file_path(
         route=route_number,
         month=month_name,
         year=year,
         mode=mode
     )
-    
     return sim_result_path, new_history_path
 
 
+def identify_pattern_by_id(driver_id):
+    """Определяет тип графика по диапазону ID."""
+    try:
+        did = int(driver_id)
+        if did < 10000:
+            return "4x2"
+        elif 10000 <= did < 20000:
+            return "5x2"
+        elif 20000 <= did < 30000:
+            return "5x2_holidays"
+        else:
+            return "Other"
+    except:
+        return "Unknown"
+
+
 def run_simulation_sequence(routes_list, db, start_month, start_year, duration, mode):
-    # 1. Генерация временной шкалы
     timeline = get_month_sequence(start_month, start_year, duration)
     logger.info(f"--- СТАРТ СИМУЛЯЦИИ: {timeline[0]} -> {timeline[-1]} ---")
+
     if config.USE_SYNTHETIC_DATA:
-        logger.info(f"📊 График: {config.SELECTED_PATTERN}")
+        logger.info(f"📊 Сценарий: {config.SIMULATION_SCENARIO_NAME}")
+        logger.info(f"📂 Источники данных: {config.INPUT_PATTERNS}")
 
     analyzer = WorkforceAnalyzer(db)
 
-    # 2. Загрузка предыстории
     first_m_name, first_y = timeline[0]
     prev_month_name, prev_year = get_previous_month(first_m_name, first_y)
 
@@ -61,103 +74,55 @@ def run_simulation_sequence(routes_list, db, start_month, start_year, duration, 
     except Exception:
         logger.warning(f"История пуста. Старт с чистого листа.")
 
-    # 3. ЦИКЛ ПО МЕСЯЦАМ
-    # ... (предыдущий код внутри run_simulation_sequence)
-
-    # 3. ЦИКЛ ПО МЕСЯЦАМ
     for month_name, year in timeline:
-        logger.info(f"--> Расчет: {month_name} {year}")
+        logger.info(f"\n--> 🗓️ РАСЧЕТ: {month_name} {year}")
         m_num = get_month_number(month_name)
         _, days_in_month = calendar.monthrange(year, m_num)
 
-        # # --- БЛОК ОТЛАДКИ (ИСПРАВЛЕННЫЙ) ---
-        # if month_name == "Январь":
-        #     print("\n🔍 --- ОТЛАДКА ДАННЫХ (ЯНВАРЬ) ---")
-        #
-        #     # 1. Пытаемся достать водителя из db.drivers
-        #     test_driver = None
-        #     if hasattr(db, 'drivers') and db.drivers:
-        #         if isinstance(db.drivers, list) and len(db.drivers) > 0:
-        #             test_driver = db.drivers[0]
-        #         elif isinstance(db.drivers, dict) and len(db.drivers) > 0:
-        #             # Если водители хранятся в словаре {id: Driver}
-        #             test_driver = list(db.drivers.values())[0]
-        #
-        #     if test_driver is None:
-        #         print("❌ ОШИБКА: Список водителей (db.drivers) пуст или не найден!")
-        #     else:
-        #         # Выводим инфо о водителе
-        #         t_num = getattr(test_driver, 'tab_number', 'Нет атрибута tab_number')
-        #         print(f"Водитель найден! Таб.№: {t_num}")
-        #
-        #         # 2. Проверяем расписание
-        #         sched = getattr(test_driver, 'schedule', {})
-        #         print(f"Тип хранилища расписания: {type(sched)}")
-        #
-        #         if isinstance(sched, dict):
-        #             keys = list(sched.keys())
-        #             if not keys:
-        #                 print("⚠️ Расписание водителя пустое!")
-        #             else:
-        #                 first_key = keys[0]
-        #                 print(f"Тип ключей (дней) в расписании: {type(first_key)} (Пример: {first_key})")
-        #
-        #                 # Проверяем наличие 31-го числа
-        #                 val_int = sched.get(31)
-        #                 val_str = sched.get("31")
-        #                 print(f"Поиск 31 (int): {val_int}")
-        #                 print(f"Поиск '31' (str): {val_str}")
-        #
-        #                 if val_int is None and val_str is None:
-        #                     print("❌ ДАННЫХ ЗА 31 ЧИСЛО В ПАМЯТИ ВОДИТЕЛЯ НЕТ!")
-        #                     print(f"Доступные дни (последние 5): {keys[-5:]}")
-        #         else:
-        #             print(f"⚠️ Расписание не словарь, а: {sched}")
-        #
-        #     print("-----------------------------------\n")
-        # # --- КОНЕЦ БЛОКА ОТЛАДКИ ---
-
         results_by_route = {route: {} for route in routes_list}
-
-        # Счетчик проблем для отчета
         total_issues_in_month = 0
+        monthly_driver_stats = {}
 
         for day in range(1, days_in_month + 1):
             daily_results = analyzer.generate_daily_roster_for_all_routes(
                 routes_list, day, month_name, year, mode=mode
             )
 
-            # --- ПРОВЕРКА НЕХВАТКИ ВОДИТЕЛЕЙ ---
+            day_mix_stats = {}
+
             for route, data in daily_results.items():
                 roster = data.get('roster', [])
-                missing_count = 0
-                for tram in roster:
-                    # Если есть issues, значит смену не закрыли
-                    if tram.get("issues"):
-                        missing_count += len(tram["issues"])
-
-                if missing_count > 0:
-                    total_issues_in_month += missing_count
-                    # Логируем конкретный день
-                    logger.error(
-                        f"🚨 НЕХВАТКА: Маршрут {route}, День {day} ({month_name}). Дыр в расписании: {missing_count}")
-
                 results_by_route[route][str(day)] = data
 
-        # Итоги месяца
-        if total_issues_in_month > 0:
-            logger.error(f"❌ МЕСЯЦ {month_name} {year} ЗАВЕРШЕН С ОШИБКАМИ!")
-            logger.error(f"   Всего незакрытых смен: {total_issues_in_month}")
-            logger.error(f"   👉 РЕКОМЕНДАЦИЯ: Добавьте больше водителей для графика {config.SELECTED_PATTERN}!")
-        else:
-            logger.info(f"✅ Месяц {month_name} {year} закрыт идеально (0 дыр).")
+                for tram in roster:
+                    if tram.get("issues"):
+                        total_issues_in_month += len(tram["issues"])
 
-        # Сохранение результатов
+                    for shift_key in ['shift_1', 'shift_2']:
+                        shift_info = tram.get(shift_key)
+                        if shift_info:
+                            d_id = str(shift_info['driver'])
+
+                            # Определяем тип графика по числу
+                            prefix = identify_pattern_by_id(d_id)
+
+                            day_mix_stats[prefix] = day_mix_stats.get(prefix, 0) + 1
+                            monthly_driver_stats[d_id] = monthly_driver_stats.get(d_id, 0) + 1
+
+            mix_str = ", ".join([f"{k}={v}" for k, v in day_mix_stats.items()])
+            if not mix_str: mix_str = "Выходной / Нет рейсов"
+            logger.info(f"   День {day:02d}: {mix_str}")
+
+        logger.info("-" * 40)
+        if total_issues_in_month > 0:
+            logger.error(f"❌ МЕСЯЦ ЗАВЕРШЕН С ОШИБКАМИ: {total_issues_in_month} дыр")
+        else:
+            logger.info(f"✅ Месяц {month_name} закрыт идеально.")
+
         for route in routes_list:
             sim_path, hist_path = get_dynamic_paths(route, month_name, year, mode)
             with open(sim_path, "w", encoding="utf-8") as f:
                 json.dump(results_by_route[route], f, ensure_ascii=False, indent=2, default=str)
-
             route_history = analyzer.get_history_serializable()
             with open(hist_path, "w", encoding="utf-8") as f:
                 json.dump(route_history, f, ensure_ascii=False, indent=2)
@@ -176,11 +141,14 @@ def main(month=None, year=None, duration=None, routes=None, mode=None):
 
     if routes:
         routes_to_process = routes
-    elif config.PROCESS_ALL_ROUTES:
+    elif config.PROCESS_ALL_ROUTES and db.schedules:
         unique_routes = set(str(s.route_number) for s in db.schedules)
         routes_to_process = sorted(list(unique_routes), key=lambda x: int(x) if x.isdigit() else x)
-    else:
+    elif config.SELECTED_ROUTE:
         routes_to_process = [str(config.SELECTED_ROUTE)]
+    else:
+        logger.error("Не выбраны маршруты в config.py")
+        return
 
     try:
         run_simulation_sequence(
