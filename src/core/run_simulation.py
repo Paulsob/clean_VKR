@@ -60,8 +60,8 @@ def run_simulation_sequence(routes_list, db, start_month, start_year, duration, 
     logger.info(f"--- СТАРТ СИМУЛЯЦИИ: {timeline[0]} -> {timeline[-1]} ---")
 
     if config.USE_SYNTHETIC_DATA:
-        logger.info(f"📊 Сценарий: {config.SIMULATION_SCENARIO_NAME}")
-        logger.info(f"📂 Источники данных: {config.INPUT_PATTERNS}")
+        logger.info(f"Сценарий: {config.SIMULATION_SCENARIO_NAME}")
+        logger.info(f"Источники данных: {config.INPUT_PATTERNS}")
 
     analyzer = WorkforceAnalyzer(db)
 
@@ -75,7 +75,7 @@ def run_simulation_sequence(routes_list, db, start_month, start_year, duration, 
         logger.warning(f"История пуста. Старт с чистого листа.")
 
     for month_name, year in timeline:
-        logger.info(f"\n--> 🗓️ РАСЧЕТ: {month_name} {year}")
+        logger.info(f"\nРАСЧЕТ: {month_name} {year}")
         m_num = get_month_number(month_name)
         _, days_in_month = calendar.monthrange(year, m_num)
 
@@ -115,9 +115,9 @@ def run_simulation_sequence(routes_list, db, start_month, start_year, duration, 
 
         logger.info("-" * 40)
         if total_issues_in_month > 0:
-            logger.error(f"❌ МЕСЯЦ ЗАВЕРШЕН С ОШИБКАМИ: {total_issues_in_month} дыр")
+            logger.error(f"МЕСЯЦ ЗАВЕРШЕН С ОШИБКАМИ: {total_issues_in_month} дыр")
         else:
-            logger.info(f"✅ Месяц {month_name} закрыт идеально.")
+            logger.info(f"Месяц {month_name} закрыт идеально.")
 
         for route in routes_list:
             sim_path, hist_path = get_dynamic_paths(route, month_name, year, mode)

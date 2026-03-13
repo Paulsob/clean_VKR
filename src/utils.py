@@ -1,6 +1,9 @@
-# src/utils.py
 from datetime import datetime, timedelta
 from src.constants import MONTH_MAP, WEEKDAY_NAMES, get_month_number
+from datetime import date
+from src.constants import get_month_number
+import src.config as config
+
 
 # Экспортируем для обратной совместимости
 __all__ = ['get_month_number', 'get_day_type_by_date', 'get_weekday_name', 
@@ -17,16 +20,24 @@ def _get_date_obj(day: int, month_str: str, year: int):
     except ValueError:
         return None
 
+def get_day_type_by_date(day_of_month: int, target_month: str, year: int) -> str:
+    m_num = get_month_number(target_month)
+    dt = date(year, m_num, day_of_month)
+    date_str = dt.strftime("%Y-%m-%d")
 
-def get_day_type_by_date(day: int, month_str: str, year: int) -> str:
-    """Определяет: рабочий или выходной"""
-    date_obj = _get_date_obj(day, month_str, year)
-    if not date_obj: return "рабочий"
-
-    if date_obj.weekday() >= 5:
+    # 1. Если это праздник -> это выходной день
+    if hasattr(config, 'PUBLIC_HOLIDAYS') and date_str in config.PUBLIC_HOLIDAYS:
         return "выходной"
-    else:
+
+    # 2. Если это рабочая суббота -> это рабочий день
+    if hasattr(config, 'WORKING_WEEKENDS') and date_str in config.WORKING_WEEKENDS:
         return "рабочий"
+
+    # 3. Базовое правило
+    if dt.weekday() >= 5:  # 5 - Суббота, 6 - Воскресенье
+        return "выходной"
+
+    return "рабочий"
 
 
 def get_weekday_name(day: int, month_str: str, year: int) -> str:

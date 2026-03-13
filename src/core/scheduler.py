@@ -1,12 +1,23 @@
 import json
 import os
+import logging
 from datetime import datetime, timedelta, date
 from typing import List, Dict, Any, Tuple
+
 from src.utils import get_day_type_by_date
-import src.config as config  # <--- Импортируем конфиг
+from src.constants import get_month_number
+import src.config as config
+
+sched_logger = logging.getLogger("src.core.scheduler")
+if not sched_logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('%(asctime)s | %(levelname)s | scheduler | %(message)s'))
+    sched_logger.addHandler(handler)
 
 
 class WorkforceAnalyzer:
+    WEEKLY_REST_HOURS = 42.0
+
     def __init__(self, db):
         self.db = db
         self.history: Dict[str, Dict[str, Any]] = {}
@@ -15,9 +26,10 @@ class WorkforceAnalyzer:
         self._load_norms()
 
     def _load_norms(self):
+        data_dir = getattr(config, 'DATA_DIR', 'data')
         possible_paths = [
+            os.path.join(data_dir, "norms_2026.json"),
             "env_synthetic/data/norms_2026.json",
-            "data/norms_2026.json",
             "norms_2026.json"
         ]
         for path in possible_paths:
@@ -33,11 +45,9 @@ class WorkforceAnalyzer:
         year_str = str(year)
         if year_str not in self.norms or month_name not in self.norms[year_str]:
             return 160.0
-
         month_norms = self.norms[year_str][month_name]
         raw_pattern = str(getattr(driver_obj, "schedule_pattern", getattr(driver_obj, "schedule", ""))).lower()
         pattern = raw_pattern.replace('х', 'x')
-
         if "5x2" in pattern: return month_norms.get("40h", 160.0)
         if "4x2" in pattern: return month_norms.get("33h", 150.0)
         return 160.0
@@ -47,8 +57,11 @@ class WorkforceAnalyzer:
 
     def get_history_serializable(self):
         return {
-            k: {'end_dt': v['end_dt'].isoformat() if isinstance(v['end_dt'], datetime) else v['end_dt'],
-                'duration': v['duration']}
+            k: {
+                'end_dt': v['end_dt'].isoformat() if isinstance(v['end_dt'], datetime) else v['end_dt'],
+                'duration': v['duration'],
+                'rest_reductions': v.get('rest_reductions', 0)
+            }
             for k, v in self.history.items()
         }
 
@@ -70,14 +83,14 @@ class WorkforceAnalyzer:
                 if isinstance(start, str):
                     try:
                         start = datetime.strptime(start, "%Y-%m-%d").date()
-                    except:
+                    except ValueError:
                         pass
                 if isinstance(end, str):
                     try:
                         end = datetime.strptime(end, "%Y-%m-%d").date()
-                    except:
+                    except ValueError:
                         pass
-                if start <= check_date <= end:
+                if isinstance(start, date) and isinstance(end, date) and start <= check_date <= end:
                     return True, reason
         return False, None
 
@@ -85,12 +98,14 @@ class WorkforceAnalyzer:
                                              target_year: int, mode: str = "real"):
         daily_history_buffer = {}
         results_by_route = {}
+
         priority_order = ["9", "20", "21", "47", "48", "55", "61"]
         sorted_routes = sorted(routes_list, key=lambda x: priority_order.index(x) if x in priority_order else 999)
 
         for route in sorted_routes:
-            result = self._generate_single_route_roster(route, day_of_month, target_month, target_year, mode,
-                                                        daily_history_buffer)
+            result = self._generate_single_route_roster(
+                route, day_of_month, target_month, target_year, mode, daily_history_buffer
+            )
             results_by_route[route] = result
 
         self.history.update(daily_history_buffer)
@@ -99,98 +114,66 @@ class WorkforceAnalyzer:
     def _generate_single_route_roster(self, route_number: str, day_of_month: int, target_month: str, target_year: int,
                                       mode: str, daily_history_buffer: Dict[str, Any]):
         current_day_type = get_day_type_by_date(day_of_month, target_month, year=target_year)
-        month_map = {"Январь": 1, "Февраль": 2, "Март": 3, "Апрель": 4, "Май": 5, "Июнь": 6, "Июль": 7, "Август": 8,
-                     "Сентябрь": 9, "Октябрь": 10, "Ноябрь": 11, "Декабрь": 12}
-        m_num = month_map.get(target_month, 1)
+        m_num = get_month_number(target_month)
         current_date = date(target_year, m_num, day_of_month)
         base_dt = datetime(target_year, m_num, day_of_month)
-        is_weekend = current_date.weekday() >= 5
+        log_prefix = f"[R{route_number} D{day_of_month:02d}]"
 
         schedule = next((s for s in self.db.schedules if
                          str(s.route_number) == str(route_number) and s.day_type.lower() == current_day_type), None)
         if not schedule:
-            return {"date": day_of_month, "route": route_number, "roster": [], "driver_stat_flags": {},
-                    "error": "Нет расписания"}
+            return {"date": day_of_month, "route": route_number, "roster": [], "driver_stat_flags": {}}
 
-        # 1. Сбор водителей
+        trams_list = schedule.trams if isinstance(schedule.trams, list) else []
+
+        def tram_sort_key(t):
+            return (0, int(str(t.number))) if str(t.number).isdigit() else (1, str(t.number))
+
+        sorted_trams = sorted(trams_list, key=tram_sort_key)
+
+
         assigned_drivers = []
         free_drivers = []
+
         for d in self.db.drivers:
-            if hasattr(d, 'month') and d.month != target_month: continue
+            if hasattr(d, 'month') and getattr(d, 'month') != target_month: continue
             is_absent, _ = self.is_driver_absent(d.id, current_date)
             if is_absent: continue
 
-            r_num = str(d.assigned_route_number) if d.assigned_route_number else None
+            allowed_routes = getattr(d, 'allowed_routes', ["ALL"])
+            if "ALL" not in allowed_routes and str(route_number) not in allowed_routes: continue
+
+            r_num = str(d.assigned_route_number) if getattr(d, 'assigned_route_number', None) else None
             if r_num == str(route_number):
                 assigned_drivers.append(d)
             elif r_num in [None, "", "None", "0", "ANY"]:
                 free_drivers.append(d)
 
-        # 2. Сортировка с использованием КОНФИГА
-        def smart_sort_key(driver):
+
+        def packing_sort_key(driver):
             d_id = str(driver.id)
-            hours_worked = self.accumulated_hours.get(d_id, 0.0)
+            hours = self.accumulated_hours.get(d_id, 0.0)
             norm = self._get_driver_norm(driver, target_year, target_month)
 
-            raw_pattern = str(getattr(driver, "schedule_pattern", getattr(driver, "schedule", ""))).lower()
-            pattern = raw_pattern.replace('х', 'x')
-            is_5x2 = "5x2" in pattern
-
-            weight = 0.0
-
-            # Лимиты берем из конфига
-            soft_limit = norm + config.OVERTIME_SOFT_LIMIT
-
-            if hours_worked > 0:
-                # ВОДИТЕЛЬ В ШТАТЕ
-                if hours_worked < norm:
-                    # УРОВЕНЬ 1: "Голодные"
-                    weight -= 10_000_000.0
-                    weight -= hours_worked
-
-                elif hours_worked < soft_limit:
-                    # УРОВЕНЬ 2: "Мягкий потолок"
-                    weight -= 5_000_000.0
-                    weight += hours_worked
-
-                else:
-                    # УРОВЕНЬ 4: "Выгоревшие" (Выше Soft Limit)
-                    weight += 10_000_000.0
-                    weight += hours_worked
+            if hours == 0.0:
+                weight = 1000.0
+            elif hours < norm:
+                weight = -hours
             else:
-                # УРОВЕНЬ 3: "Новички"
-                pass
-
-            # Бонус графика 5x2
-            if not is_weekend and is_5x2:
-                weight -= 100_000.0
+                weight = 500.0 + hours
 
             try:
                 id_val = int(d_id)
-            except:
+            except ValueError:
                 id_val = d_id
-
             return (weight, id_val)
 
-        assigned_drivers.sort(key=smart_sort_key)
-        free_drivers.sort(key=smart_sort_key)
-
-        trams_list = schedule.trams if isinstance(schedule.trams, list) else []
-
-        def tram_sort_key(t):
-            val = str(t.number)
-            return (0, int(val)) if val.isdigit() else (1, val)
-
-        sorted_trams = sorted(trams_list, key=tram_sort_key)
+        assigned_drivers.sort(key=packing_sort_key)
+        free_drivers.sort(key=packing_sort_key)
 
         tram_map = {}
-        earliest_start_dt = base_dt + timedelta(hours=23, minutes=59)
         for tram in sorted_trams:
             tram_map[tram.number] = {"tram_number": tram.number, "shift_1": None, "shift_2": None, "issues": []}
-            if tram.shift_1:
-                start = self._combine_dt(base_dt, tram.shift_1.start)
-                if start < earliest_start_dt: earliest_start_dt = start
-        if earliest_start_dt > base_dt + timedelta(hours=20): earliest_start_dt = base_dt + timedelta(hours=5)
 
         worked_drivers_ids = set()
 
@@ -200,121 +183,131 @@ class WorkforceAnalyzer:
             s_end = self._combine_dt(base_dt, shift_data.end)
             if s_end < s_start: s_end += timedelta(days=1)
             s_dur = (s_end - s_start).total_seconds() / 3600.0
+            shift_id = f"T{tram_obj.number}/S{shift_name}"
 
-            # 1. Штатный поиск
-            cand, src, warns, rest = self._find_candidate([assigned_drivers], day_of_month, shift_name, s_start, s_dur,
-                                                          mode, daily_history_buffer, target_year, target_month)
+            tram_model = str(
+                getattr(tram_obj, 'tram_type', getattr(tram_obj, 'model', getattr(tram_obj, 'type', 'ALL'))))
+
+            def filter_by_tram(drivers_list):
+                return [d for d in drivers_list if
+                        "ALL" in getattr(d, 'allowed_trams', ["ALL"]) or tram_model in getattr(d, 'allowed_trams',
+                                                                                               ["ALL"])]
+
+            val_assign = filter_by_tram(assigned_drivers)
+            val_free = filter_by_tram(free_drivers)
+
+            cand, src, warns, rest, new_reductions = None, None, [], 0, 0
+
+            cand, src, warns, rest, new_reductions = self._find_candidate(val_assign, day_of_month, shift_name, s_start,
+                                                                          s_dur, mode, daily_history_buffer,
+                                                                          target_year, target_month)
+            if cand: src = "assigned"
 
             if not cand:
-                cand, src, warns, rest = self._find_candidate([free_drivers], day_of_month, shift_name, s_start, s_dur,
-                                                              mode, daily_history_buffer, target_year, target_month)
-                if cand: src = "recruit"
-
-            # 2. Овертайм (Только Real)
-            if not cand and mode == "real":
-                cand, src, warns, rest = self._find_overtime_candidate([assigned_drivers + free_drivers], day_of_month,
-                                                                       s_start, s_dur, daily_history_buffer,
-                                                                       target_year, target_month)
+                cand, src, warns, rest, new_reductions = self._find_candidate(val_free, day_of_month, shift_name,
+                                                                              s_start, s_dur, mode,
+                                                                              daily_history_buffer, target_year,
+                                                                              target_month)
+                if cand: src = "free"
 
             if cand:
                 tram_map[tram_obj.number][f"shift_{shift_name}"] = {
                     "driver": str(cand.id), "work_hours": round(s_dur, 2), "rest_before": round(rest, 1),
                     "warnings": warns, "source": src
                 }
-                daily_history_buffer[str(cand.id)] = {"end_dt": s_end, "duration": s_dur}
+                daily_history_buffer[str(cand.id)] = {"end_dt": s_end, "duration": s_dur,
+                                                      "rest_reductions": new_reductions}
                 worked_drivers_ids.add(str(cand.id))
                 self.accumulated_hours[str(cand.id)] = self.accumulated_hours.get(str(cand.id), 0.0) + s_dur
             else:
                 tram_map[tram_obj.number]["issues"].append(f"Нет водителя ({shift_name})")
+                sched_logger.warning(f"{log_prefix} {shift_id} ДЫРА!")
 
         for tram in sorted_trams: process_single_shift(tram, tram.shift_1, "1")
         for tram in sorted_trams: process_single_shift(tram, tram.shift_2, "2")
 
-        driver_stat_flags = {}
-        for drv in assigned_drivers:
-            d_id = str(drv.id)
-            if d_id in worked_drivers_ids: continue
-            plan = drv.get_status_for_day(day_of_month)
-            if str(plan) in ["1", "2"]:
-                driver_stat_flags[d_id] = "reserve"
+        driver_stat_flags = {str(d.id): "reserve" for d in assigned_drivers if
+                             str(d.id) not in worked_drivers_ids and str(d.get_status_for_day(day_of_month)) in ["1",
+                                                                                                                 "2",
+                                                                                                                 "Р",
+                                                                                                                 "Я"]}
 
         return {"date": day_of_month, "route": route_number, "roster": list(tram_map.values()),
                 "driver_stat_flags": driver_stat_flags}
 
-    def _find_candidate(self, groups, day, target_shift, start, dur, mode, daily_buffer, year, month):
-        for drivers in groups:
-            for d in drivers:
-                d_id = str(d.id)
-                if d_id in daily_buffer: continue
 
-                # Проверка графика
-                if str(d.get_status_for_day(day)) != str(target_shift): continue
+    def _find_candidate(self, pool, day, target_shift, start, dur, mode, daily_buffer, year, month):
+        max_shift = config.WORK_MAX_HOURS_EXTENDED if mode == "real" else config.WORK_MAX_HOURS_STANDARD
+        if dur > max_shift or dur < config.WORK_MIN_HOURS: return None, None, [], 0, 0
 
-                curr = self.accumulated_hours.get(d_id, 0.0)
-                norm = self._get_driver_norm(d, year, month)
+        for d in pool:
+            d_id = str(d.id)
+            if d_id in daily_buffer: continue
 
-                # Лимит: Норма + HARD LIMIT (берем из конфига)
-                limit = norm + (config.OVERTIME_HARD_LIMIT if mode == "real" else 0)
+            status = str(d.get_status_for_day(day)).upper().strip()
+            if status not in [str(target_shift), "Р", "Я", "WORK", "S", "-1"]:
+                continue
 
-                if curr + dur > limit: continue
+            curr = self.accumulated_hours.get(d_id, 0.0)
+            norm = self._get_driver_norm(d, year, month)
+            limit = norm + (config.OVERTIME_HARD_LIMIT if mode == "real" else 0)
 
-                can_work, rest, warns = self._check_rest_rules(d, start, mode)
-                if not can_work: continue
+            if curr + dur > limit:
+                continue
 
-                return d, "main", warns, rest
-        return None, None, [], 0
+            can_work, rest, warns, new_reductions = self._check_rest_rules(d, start, mode)
+            if not can_work:
+                continue
 
-    def _find_overtime_candidate(self, groups, day, start, dur, daily_buffer, year, month):
-        for drivers in groups:
-            for d in drivers:
-                d_id = str(d.id)
-                if d_id in daily_buffer: continue
+            return d, "main", warns, rest, new_reductions
 
-                curr = self.accumulated_hours.get(d_id, 0.0)
-                norm = self._get_driver_norm(d, year, month)
-
-                # Лимит Овертайма: тоже берем из конфига
-                limit = norm + config.OVERTIME_HARD_LIMIT
-                if curr + dur > limit: continue
-
-                can_work, rest, warns = self._check_rest_rules(d, start, "real")
-                if not can_work: continue
-
-                warns.append("Работа в выходной")
-                return d, "overtime", warns, rest
-        return None, None, [], 0
+        return None, None, [], 0, 0
 
     def _check_rest_rules(self, driver, start_dt, mode):
         d_id = str(driver.id)
         last = self.history.get(d_id)
-        if not last: return True, 999.0, []
+        if not last: return True, 999.0, [], 0
 
         end_dt = last['end_dt']
         if isinstance(end_dt, str): end_dt = datetime.fromisoformat(end_dt)
 
+        last_dur = last['duration']
+        current_reductions = last.get('rest_reductions', 0)
         gap = (start_dt - end_dt).total_seconds() / 3600.0
-        if gap < 0: return False, gap, ["Накладка"]
+
+        if gap < 0:
+            return False, gap, ["Накладка"], current_reductions
+
+        if gap >= self.WEEKLY_REST_HOURS: return True, gap, [], 0
 
         warns = []
         is_ok = True
+        new_reductions = current_reductions
+        req_standard = config.REST_MULTIPLIER * last_dur
+        req_reduced = config.REST_MIN_REDUCED
+        limit_reductions = config.REST_REDUCTIONS_LIMIT_REAL if mode == "real" else config.REST_REDUCTIONS_LIMIT_STRICT
 
-        if mode == "strict":
-            # STRICT: используем настройки из конфига
-            required = max(config.REST_MIN_HOURS_STRICT, config.REST_MULTIPLIER_STRICT * last['duration'])
-            if gap < required: is_ok = False
+        if gap >= req_standard:
+            pass
+        elif gap >= req_reduced:
+            if current_reductions < limit_reductions:
+                new_reductions += 1
+                if mode != "strict": warns.append(f"Сокращенный отдых: {round(gap, 1)}ч")
+            else:
+                if mode == "strict":
+                    is_ok = False
+                else:
+                    warns.append(f"Лимит сокращений ({limit_reductions}) превышен!")
+                    new_reductions += 1
         else:
-            # REAL: используем настройки из конфига
-            if gap < config.REST_MIN_HOURS_REAL:
-                is_ok = False
-            # Предупреждение, если меньше строгого правила
-            elif gap < (config.REST_MULTIPLIER_STRICT * last['duration']):
-                warns.append("(!)")
+            is_ok = False
+            warns.append(f"Отдых меньше {req_reduced}ч")
 
-        return is_ok, gap, warns
+        return is_ok, gap, warns, new_reductions
 
     def _combine_dt(self, base, time_str):
         try:
             h, m = map(int, time_str.split(':'))
             return base + timedelta(hours=h, minutes=m)
-        except:
+        except ValueError:
             return base

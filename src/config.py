@@ -12,21 +12,30 @@ def _get_logger():
 USE_SYNTHETIC_DATA = True
 
 PROCESS_ALL_ROUTES = False
-SELECTED_ROUTE = "47"
+SELECTED_ROUTE = "9"
 SELECTED_MONTH = "Март"
 SELECTED_YEAR = 2026
-SIMULATION_MODE = "real"  # strict / real
+SIMULATION_MODE = "strict"  # strict / real
 SIMULATION_DURATION = 1
 
-# Имя сценария (имя папки с результатами)
-# ВАЖНО: Если вы хотите прочитать старые результаты из папки "mixed",
-# назовите переменную "mixed". Если хотите новую папку - оставьте как есть.
+
+PUBLIC_HOLIDAYS = [
+    "2026-01-01", "2026-01-02", "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09",
+    "2026-02-23", "2026-02-24",
+    "2026-03-09",
+    "2026-05-01", "2026-05-04", "2026-05-05",
+    "2026-05-11",
+    "2026-06-12",
+    "2026-11-04",
+    "2026-12-31",
+]
+
+WORKING_WEEKENDS = []
+
 SIMULATION_SCENARIO_NAME = "mix_optimization_v1"
 
-# Список папок с данными
-INPUT_PATTERNS = ["4x2", "5х2_holiday"]
+INPUT_PATTERNS = ["4x2"]
 
-# 3. НАСТРОЙКА ПУТЕЙ
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 if USE_SYNTHETIC_DATA:
@@ -38,7 +47,6 @@ else:
 ENV_DIR = os.path.join(BASE_DIR, ENV_FOLDER_NAME)
 DATA_DIR = os.path.join(ENV_DIR, "data")
 
-# Если синтетика - результаты и историю в папку СЦЕНАРИЯ
 if USE_SYNTHETIC_DATA:
     RESULTS_DIR = os.path.join(DATA_DIR, "results", SIMULATION_SCENARIO_NAME)
     HISTORY_DIR = os.path.join(ENV_DIR, "history", SIMULATION_SCENARIO_NAME)
@@ -51,7 +59,6 @@ OUTPUTS_DIR = os.path.join(ENV_DIR, "outputs")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(HISTORY_DIR, exist_ok=True)
 
-# 5. ФОРМИРОВАНИЕ ИМЕН ФАЙЛОВ
 month_num = get_month_number(SELECTED_MONTH)
 directory_name_common = f"{month_num:02d}_{SELECTED_MONTH}_{SELECTED_YEAR}"
 
@@ -80,24 +87,21 @@ path_manager = PathManager(
 )
 path_manager.ensure_directories()
 
-# 7. НАСТРОЙКИ ВРЕМЕНИ И ОГРАНИЧЕНИЙ
+WORK_MIN_HOURS = 2.0            # Минимальная смена
+WORK_MAX_HOURS_STANDARD = 10.0  # Стандартный максимум
+WORK_MAX_HOURS_EXTENDED = 12.0  # Максимум по согласованию (разрешено в Real)
 
-# ОТДЫХ
-# Минимальный отдых между сменами (в часах)
-REST_MIN_HOURS_REAL = 12.0      # Режим Real: минимум 12 часов
-REST_MIN_HOURS_STRICT = 12.0    # Режим Strict: минимум 12 часов (база)
+# ЕЖЕДНЕВНЫЙ ОТДЫХ
+# Базовое правило: Отдых >= Работа * REST_MULTIPLIER
+REST_MULTIPLIER = 2.0
 
-# Множитель отдыха для STRICT режима
-# Формула: Отдых >= Время_Работы * REST_MULTIPLIER_STRICT
-# Если 2.0, то после 8 часов работы нужно 16 часов отдыха.
-REST_MULTIPLIER_STRICT = 2.0
+# Исключение: Можно сокращать отдых до этого значения...
+REST_MIN_REDUCED = 12.0
 
-# ПЕРЕРАБОТКИ
-# Порог "Мягкого потолка" (часов сверх нормы).
-# Если водитель набрал Норму + SOFT_LIMIT, его приоритет резко падает,
-# чтобы система перестала его назначать без крайней нужды.
-OVERTIME_SOFT_LIMIT = 20.0
+# ...но не более стольких раз за неделю (между выходными 42ч+)
+REST_REDUCTIONS_LIMIT_STRICT = 2  # Для Strict
+REST_REDUCTIONS_LIMIT_REAL = 99   # Для Real (отключаем счетчик, разрешаем всегда до 9-12ч)
 
-# Жесткий лимит переработки (часов сверх нормы).
-# Если водитель набрал Норму + HARD_LIMIT, ему ЗАПРЕЩЕНО работать вообще.
-OVERTIME_HARD_LIMIT = 40.0
+# ПЕРЕРАБОТКИ (МЕСЯЦ)
+OVERTIME_SOFT_LIMIT = 20.0  # Мягкий потолок
+OVERTIME_HARD_LIMIT = 40.0  # Жесткий потолок (ТК РФ: 120ч в год ~ 10-20 в месяц, но мы берем запас)
